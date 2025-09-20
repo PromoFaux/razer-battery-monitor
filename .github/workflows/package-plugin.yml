@@ -1,15 +1,18 @@
-name: Build and Package Stream Deck Plugin
+name: Stream Deck Plugin CI/CD
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  release:
+    types: [ published ]
   workflow_dispatch:
 
 jobs:
-  build-and-package:
+  validate:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,14 +27,36 @@ jobs:
           npm install
           npm run build
 
-      - name: Validate and Package Stream Deck Plugin
+      - name: Validate Stream Deck Plugin
+        uses: neilenns/streamdeck-cli-pack@v1
+        with:
+          path: com.promofaux.razer-battery-monitor.sdPlugin
+          dryRun: true
+
+  release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build plugin
+        run: |
+          npm install
+          npm run build
+
+      - name: Package Stream Deck Plugin
         uses: neilenns/streamdeck-cli-pack@v1
         with:
           path: com.promofaux.razer-battery-monitor.sdPlugin
           outputPath: dist
 
-      - name: Upload packaged plugin artifact
-        uses: actions/upload-artifact@v4
+      - name: Attach plugin to release
+        uses: softprops/action-gh-release@v1
         with:
-          name: streamdeck-plugin
-          path: ./dist/*.streamDeckPlugin
+          files: ./dist/*.streamDeckPlugin
