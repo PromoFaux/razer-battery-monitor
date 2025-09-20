@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Razer Keyboard Battery Inspector</title>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    #deviceName { font-weight: bold; color: #2e8b57; }
+  </style>
+</head>
+<body>
+  <h2>Razer Keyboard Battery</h2>
+  <div>Detected Device: <span id="deviceName">(none)</span></div>
+  <script>
+    // Stream Deck PI API
+    $SD.on('sendToPropertyInspector', ({detail}) => {
+      if (detail && detail.payload && detail.payload.deviceName) {
+        document.getElementById('deviceName').textContent = detail.payload.deviceName;
+      }
+    });
+  </script>
+</body>
+</html>

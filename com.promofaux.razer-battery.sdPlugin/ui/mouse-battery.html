@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Razer Mouse Battery Inspector</title>
+    <script src="https://sdpi-components.dev/releases/v4/sdpi-components.js"></script>
+  
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: transparent;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            background: #f6f6f6;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            padding: 1.2em 1.5em;
+            min-width: 240px;
+            text-align: left;
+            margin: 1.5em auto;
+            box-sizing: border-box;
+        }
+        h2 {
+            margin-top: 0;
+            color: #2e8b57;
+            font-size: 1.1em;
+            letter-spacing: 0.5px;
+        }
+        #deviceName {
+            font-weight: bold;
+            color: #222;
+            font-size: 1em;
+            margin-left: 0.3em;
+        }
+        .label {
+            color: #666;
+            font-size: 0.98em;
+            margin-bottom: 0.3em;
+            display: inline-block;
+        }
+            /* Removed batteryChart styles */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Razer Mouse Battery</h2>
+            <span class="label">Detected Device:</span>
+            <span id="deviceName">(none)</span>
+            <div style="margin-top:1em;">
+                <span class="label">Battery Level:</span>
+                <span id="batteryLevel">--%</span>
+            </div>
+            <div>
+                <span class="label">Charging State:</span>
+                <span id="chargingState">--</span>
+            </div>
+    </div>
+        <script>
+            // Stream Deck Client logic
+            const { streamDeckClient } = window.SDPIComponents || {};
+                function updatePI(settings) {
+                    if (settings && settings.deviceName) {
+                        document.getElementById('deviceName').textContent = settings.deviceName;
+                    }
+                    if (settings && typeof settings.batteryLevel === 'number') {
+                        document.getElementById('batteryLevel').textContent = settings.batteryLevel + '%';
+                    } else {
+                        document.getElementById('batteryLevel').textContent = '--%';
+                    }
+                    if (settings && typeof settings.charging === 'boolean') {
+                        document.getElementById('chargingState').textContent = settings.charging ? 'Charging' : 'Not Charging';
+                    } else {
+                        document.getElementById('chargingState').textContent = '--';
+                    }
+                }
+            if (streamDeckClient) {
+                streamDeckClient.didReceiveSettings.subscribe(({ settings }) => {
+                    updatePI(settings);
+                });
+                streamDeckClient.getSettings().then(({ settings }) => {
+                    updatePI(settings);
+                });
+            } else {
+                console.log('streamDeckClient is NOT defined. window keys:', Object.keys(window));
+            }
+        </script>
+</body>
+</html>
