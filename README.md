@@ -29,7 +29,42 @@ This plugin has been tested with the following Razer devices:
 
 - Stream Deck software version 6.5 or higher
 - Razer device connected via USB
-- Windows only? I honestly don't know. I'll try it on my Macbook Air and update this if it works...
+- **Windows**: Fully supported
+- **macOS**: Supported, but may require additional setup (see macOS Setup below)
+
+## macOS Setup
+
+**The plugin now includes automatic macOS support!** 🎉
+
+When the plugin detects USB access issues on macOS, it will:
+
+1. **Automatically prompt for administrator privileges** using macOS's built-in security dialog
+2. **Start a background privileged service** to handle USB communication
+3. **Seamlessly provide battery information** without any manual setup
+
+### What to Expect on macOS
+
+- **First Use**: You'll see a macOS authentication dialog asking for your password
+- **Purpose**: This allows the plugin to access USB devices that are claimed by system drivers
+- **Privacy**: The privileged service only runs when needed and only accesses Razer devices
+- **No Terminal Windows**: Everything happens in the background
+
+### Manual Development/Testing (Optional)
+
+For development or advanced troubleshooting, you can manually control the privileged service:
+
+- **Start**: `./scripts/razer-service.sh start` 
+- **Stop**: `./scripts/razer-service.sh stop`
+- **Status**: `./scripts/razer-service.sh status`
+- **Test**: `./scripts/razer-service.sh test`
+
+### Troubleshooting
+
+If you experience issues on macOS:
+1. **Physical reconnection**: Disconnect and reconnect your Razer device
+2. **Check Privacy & Security**: System Settings > Privacy & Security > Input Monitoring
+3. **Try different USB port**: Some USB hubs may cause issues
+4. **Restart Stream Deck**: Close and reopen the Stream Deck application
 
 
 ## Motivation
@@ -77,12 +112,3 @@ MIT License - see LICENSE file for details
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
-
-## Troubleshooting
-
-### No Device Found
-- Ensure your Razer device is connected via USB
-- Try unplugging and reconnecting the device
-- Check that the device is recognized in Razer Synapse
-
----

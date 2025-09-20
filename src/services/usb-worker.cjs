@@ -337,7 +337,7 @@ async function getAvailableDevices() {
 /**
  * Gets the real battery level using WebUSB for a specific device
  */
-async function getBatteryLevel(targetProductId = null) {
+async function getBatteryLevel(targetProductId = null, retryCount = 0) {
 	try {
 		console.log(`USB Worker: Looking for Razer device${targetProductId ? ` with ID 0x${targetProductId.toString(16)}` : ''}...`);
 		
@@ -374,6 +374,14 @@ async function getBatteryLevel(targetProductId = null) {
 
 	} catch (error) {
 		console.error('USB Worker: Error in getBatteryLevel:', error);
+		
+		// On macOS, if we get access errors, try retrying after a short delay
+		if (error.message.includes('LIBUSB_ERROR_ACCESS') && retryCount < 2) {
+			console.log(`USB Worker: Retrying in 2 seconds... (attempt ${retryCount + 1}/3)`);
+			await new Promise(resolve => setTimeout(resolve, 2000));
+			return await getBatteryLevel(targetProductId, retryCount + 1);
+		}
+		
 		return null;
 	}
 }
@@ -391,13 +399,21 @@ async function getBatteryFromDevice(device) {
 		console.log(`USB Worker: Detected keyboard device, using keyboard-specific transaction ID...`);
 		
 		// Open device for keyboard communication
-		await device.open();
-		if (device.configuration === null) {
-			await device.selectConfiguration(1);
-		}
+	await device.open();
+	if (device.configuration === null) {
+		await device.selectConfiguration(1);
+	}
+	
+	try {
 		await device.claimInterface(2); // Interface 2 for control
-		
-		try {
+	} catch (error) {
+		if (error.message.includes('LIBUSB_ERROR_ACCESS')) {
+			console.error('USB Worker: Access denied - device may be in use by system driver on macOS');
+			console.error('USB Worker: Try disconnecting and reconnecting the device, or check System Settings > Privacy & Security');
+			throw new Error('USB access denied - device claimed by system on macOS');
+		}
+		throw error;
+	}		try {
 			return await getBatteryFromKeyboard(device, device.productId);
 		} finally {
 			// Close the device properly
@@ -417,7 +433,17 @@ async function getBatteryFromDevice(device) {
 	if (device.configuration === null) {
 		await device.selectConfiguration(1);
 	}
-	await device.claimInterface(device.configuration.interfaces[0].interfaceNumber);
+	
+	try {
+		await device.claimInterface(device.configuration.interfaces[0].interfaceNumber);
+	} catch (error) {
+		if (error.message.includes('LIBUSB_ERROR_ACCESS')) {
+			console.error('USB Worker: Access denied - device may be in use by system driver on macOS');
+			console.error('USB Worker: Try disconnecting and reconnecting the device, or check System Settings > Privacy & Security');
+			throw new Error('USB access denied - device claimed by system on macOS');
+		}
+		throw error;
+	}
 
 	try {
 		// Request 1: Get battery level (command 0x80)
