@@ -6,7 +6,7 @@ import path from "node:path";
 import url from "node:url";
 
 const isWatching = !!process.env.ROLLUP_WATCH;
-const sdPlugin = "com.promofaux.razer-battery.sdPlugin";
+const sdPlugin = "com.promofaux.razer-battery-monitor.sdPlugin";
 
 /**
  * @type {import('rollup').RollupOptions}

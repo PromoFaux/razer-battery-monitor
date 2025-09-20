@@ -27,7 +27,7 @@ jobs:
       - name: Validate and Package Stream Deck Plugin
         uses: neilenns/streamdeck-cli-pack@v1
         with:
-          path: com.promofaux.razer-battery.sdPlugin
+          path: com.promofaux.razer-battery-monitor.sdPlugin
           outputPath: dist
 
       - name: Upload packaged plugin artifact

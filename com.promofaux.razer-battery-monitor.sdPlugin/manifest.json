@@ -1,0 +1,63 @@
+{
+	"Name": "Razer Battery Monitor",
+	"Version": "0.1.0.1",
+	"Author": "Promofaux (With AI Assistance...)",
+	"Actions": [
+		{
+			"Name": "Razer Mouse Battery",
+			"UUID": "com.promofaux.razer-battery-monitor.mouse-battery",
+			"Icon": "imgs/actions/battery/icon",
+			"Tooltip": "Displays battery level of connected Razer mouse.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/battery/key",
+					"TitleAlignment": "middle"
+				}
+			],
+			"PropertyInspectorPath": "ui/mouse-battery.html"
+		},
+		{
+			"Name": "Razer Keyboard Battery",
+			"UUID": "com.promofaux.razer-battery-monitor.keyboard-battery",
+			"Icon": "imgs/actions/battery/icon",
+			"Tooltip": "Displays battery level of connected Razer keyboard.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/actions/battery/key",
+					"TitleAlignment": "middle"
+				}
+			],
+			"PropertyInspectorPath": "ui/keyboard-battery.html"
+		}
+	],
+	"Category": "Razer Battery Monitor",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "A Plugin to read battery levels of various Razer Devices",
+	"Icon": "imgs/plugin/marketplace",
+	"SDKVersion": 2,
+	"Software": {
+		"MinimumVersion": "6.5"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "20",
+		"Debug": "enabled"
+	},
+	"UUID": "com.promofaux.razer-battery-monitor"
+}

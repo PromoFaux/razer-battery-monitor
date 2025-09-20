@@ -5,7 +5,7 @@ import { WIRELESS_MICE } from "../constants/device-ids";
 /**
  * An action that displays the battery level of connected Razer mouse devices.
  */
-@action({ UUID: "com.promofaux.razer-battery.mouse-battery" })
+@action({ UUID: "com.promofaux.razer-battery-monitor.mouse-battery" })
 export class RazerMouseBattery extends RazerBatteryAction<MouseBatterySettings> {
 	protected getDeviceType(): string {
 		return "Mouse";

@@ -5,7 +5,7 @@ import { WIRELESS_KEYBOARDS } from "../constants/device-ids";
 /**
  * An action that displays the battery level of connected Razer keyboard devices.
  */
-@action({ UUID: "com.promofaux.razer-battery.keyboard-battery" })
+@action({ UUID: "com.promofaux.razer-battery-monitor.keyboard-battery" })
 export class RazerKeyboardBattery extends RazerBatteryAction<KeyboardBatterySettings> {
 	protected getDeviceType(): string {
 		return "Keyboard";
