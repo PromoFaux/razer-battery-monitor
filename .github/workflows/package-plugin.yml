@@ -36,6 +36,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -55,6 +57,7 @@ jobs:
         with:
           path: com.promofaux.razer-battery-monitor.sdPlugin
           outputPath: dist
+          version: ${{ github.event.release.tag_name }}
 
       - name: Attach plugin to release
         uses: softprops/action-gh-release@v1
