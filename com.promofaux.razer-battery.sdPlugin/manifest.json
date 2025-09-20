@@ -36,7 +36,7 @@
 			   "PropertyInspectorPath": "ui/keyboard-battery.html"
 		   }
 	],
-	"Category": "Razer Battery",
+	"Category": "Razer Battery Monitor",
 	"CategoryIcon": "imgs/plugin/category-icon",
 	"CodePath": "bin/plugin.js",
 	"Description": "A Plugin to read battery levels of various Razer Devices",
