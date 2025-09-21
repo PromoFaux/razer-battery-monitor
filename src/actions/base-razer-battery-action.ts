@@ -19,14 +19,14 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 	 */
 	override async onWillAppear(ev: WillAppearEvent<T>): Promise<void> {
 		const deviceType = this.getDeviceType();
-		streamDeck.logger.info(`${deviceType} battery action appeared`);
+		streamDeck.logger.info(`[   Service] ${deviceType} battery action appeared`);
 		
 		// Set initial display
 		await this.updateBatteryDisplay(ev);
 		
 		// Set up periodic updates with device-specific default interval
 		const updateIntervalMs = (ev.payload.settings.updateInterval ?? this.getDefaultInterval()) * 1000;
-		streamDeck.logger.info(`${deviceType} battery: ${updateIntervalMs}ms update interval`); // Changed from debug to info
+		streamDeck.logger.info(`[   Service] ${deviceType} battery: ${updateIntervalMs}ms update interval`); // Changed from debug to info
 		
 		   this.updateInterval = setInterval(async () => {
 			   await this.updateBatteryDisplay(ev);
@@ -49,7 +49,7 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 	 */
 	   override async onKeyDown(ev: KeyDownEvent<T>): Promise<void> {
 		   const deviceType = this.getDeviceType();
-		   streamDeck.logger.info(`${deviceType} battery: Manual refresh (invalidating device cache)`);
+		   streamDeck.logger.info(`[   Service] ${deviceType} battery: Manual refresh (invalidating device cache)`);
 		   try {
 			   // On manual refresh, invalidate device cache in case user connected/disconnected devices
 			   this.batteryService.invalidateDeviceCache();
@@ -72,7 +72,7 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 			   );
 			   
 		   if (batteryInfo) {
-			   streamDeck.logger.info(`Found ${deviceType.toLowerCase()}: ${batteryInfo.deviceName}`);				   // Set device name, batteryLevel, and charging state in settings so PI can receive them
+			   streamDeck.logger.info(`[   Service] Found ${deviceType.toLowerCase()}: ${batteryInfo.deviceName}`);				   // Set device name, batteryLevel, and charging state in settings so PI can receive them
 				   const newSettings = {
 					   ...ev.payload.settings,
 					   deviceName: batteryInfo.deviceName,
@@ -84,13 +84,13 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 				   if (batteryInfo.isCharging && batteryInfo.batteryLevel === null) {
 					   // Device is charging but battery level is unreliable
 					   const displayText = this.formatDisplayText(0, true);
-					   streamDeck.logger.info(`${deviceType} battery: charging (level unavailable)`);
+					   streamDeck.logger.info(`[   Service] ${deviceType} battery: charging (level unavailable)`);
 					   await ev.action.setTitle(displayText);
 				   } else if (batteryInfo.batteryLevel !== null) {
 					   // Normal case with valid battery level
 					   const batteryPercent = Math.round(batteryInfo.batteryLevel);
 					   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false);
-					   streamDeck.logger.info(`${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
+					   streamDeck.logger.info(`[   Service] ${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
 					   await ev.action.setTitle(displayText);
 					   // Set battery level icon
 					   const iconPath = this.getBatteryIconPath(batteryInfo.batteryLevel);

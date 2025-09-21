@@ -37,7 +37,7 @@ export class RazerBatteryService {
 			return; // Worker already running
 		}
 
-		streamDeck.logger.info('Starting persistent USB worker...');
+		streamDeck.logger.info('[   Service] Starting persistent USB worker...');
 		
 		this.worker = fork(this.workerPath, [], {
 			stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
@@ -63,9 +63,9 @@ export class RazerBatteryService {
 
 		// Handle worker errors
 		this.worker.on('error', (error) => {
-			streamDeck.logger.error('Worker error:', error.message);
+			streamDeck.logger.error('[   Service] Worker error:', error.message);
 			if (error.message.includes('ENOENT') || (error as any).code === 'ENOENT') {
-				streamDeck.logger.error('FATAL: Stream Deck Node.js runtime not found. Try restarting Stream Deck.');
+				streamDeck.logger.error('[   Service] FATAL: Stream Deck Node.js runtime not found. Try restarting Stream Deck.');
 			}
 			this.handleWorkerExit();
 		});
@@ -73,7 +73,7 @@ export class RazerBatteryService {
 		// Handle worker exit
 		this.worker.on('exit', (code, signal) => {
 			if (!this.isShuttingDown) {
-				streamDeck.logger.warn(`Worker process exited with code ${code}, signal ${signal}`);
+				streamDeck.logger.warn(`[   Service] Worker process exited with code ${code}, signal ${signal}`);
 			}
 			this.handleWorkerExit();
 		});
@@ -107,7 +107,7 @@ export class RazerBatteryService {
 			});
 		}
 
-		streamDeck.logger.info('Persistent USB worker started'); // Changed from debug to info
+		streamDeck.logger.info('[   Service] Persistent USB worker started'); // Changed from debug to info
 	}
 
 	/**
@@ -164,10 +164,10 @@ export class RazerBatteryService {
 		try {
 			const result = await this.sendMessage('list', [], 10000);
 			const devices = result.devices || [];
-			streamDeck.logger.debug(`Retrieved device list: found ${devices.length} devices`);
+			streamDeck.logger.debug(`[   Service] Retrieved device list: found ${devices.length} devices`);
 			return devices;
 		} catch (error) {
-			streamDeck.logger.error('Failed to get device list:', error);
+			streamDeck.logger.error('[   Service] Failed to get device list:', error);
 			throw error;
 		}
 	}
@@ -176,7 +176,7 @@ export class RazerBatteryService {
 	 * Invalidates cached data when devices change.
 	 */
 	invalidateDeviceCache(): void {
-		streamDeck.logger.info('Device cache invalidated - clearing battery cache');
+		streamDeck.logger.info('[   Service] Device cache invalidated - clearing battery cache');
 		this.batteryCache.clear(); // Clear battery cache when devices change
 	}
 
@@ -190,7 +190,7 @@ export class RazerBatteryService {
 		
 		if (!targetDevice) {
 			// Device not found, try refreshing once
-			streamDeck.logger.info(`Device 0x${productId.toString(16)} not found, refreshing...`);
+			streamDeck.logger.info(`[   Service] Device 0x${productId.toString(16)} not found, refreshing...`);
 			this.invalidateDeviceCache();
 			devices = await this.getAvailableDevices();
 			targetDevice = devices.find(device => device.productId === productId);
@@ -216,7 +216,7 @@ export class RazerBatteryService {
 			if (targetProductId !== undefined) {
 				const targetDevice = await this.findDevice(targetProductId);
 				if (!targetDevice) {
-					streamDeck.logger.warn(`Requested device 0x${targetProductId.toString(16)} not found in cache`);
+					streamDeck.logger.warn(`[   Service] Requested device 0x${targetProductId.toString(16)} not found in cache`);
 					return null;
 				}
 				
@@ -224,11 +224,11 @@ export class RazerBatteryService {
 				const now = Date.now();
 				const cachedBattery = this.batteryCache.get(targetProductId);
 				if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
-					streamDeck.logger.info(`Using cached battery for ${targetDevice.name} (${now - cachedBattery.timestamp}ms old)`);
+					streamDeck.logger.info(`[   Service] Using cached battery for ${targetDevice.name} (${now - cachedBattery.timestamp}ms old)`);
 					return cachedBattery;
 				}
 				
-				streamDeck.logger.info(`Getting battery for cached device: ${targetDevice.name}`); // Changed from debug to info
+				streamDeck.logger.info(`[   Service] Getting battery for cached device: ${targetDevice.name}`); // Changed from debug to info
 			}
 
 			const args = [];
@@ -249,7 +249,7 @@ export class RazerBatteryService {
 			// If the worker returns null for a specific device (device not found), 
 			// but we expected it to exist, invalidate cache and retry once
 			if (result === null && targetProductId !== undefined && !this.retryAttempted) {
-				streamDeck.logger.info(`Battery query failed for device 0x${targetProductId.toString(16)} (device may have changed mode), invalidating cache and retrying...`);
+				streamDeck.logger.info(`[   Service] Battery query failed for device 0x${targetProductId.toString(16)} (device may have changed mode), invalidating cache and retrying...`);
 				this.retryAttempted = true; // Prevent infinite retry loop
 				this.invalidateDeviceCache();
 				
@@ -259,16 +259,16 @@ export class RazerBatteryService {
 					const freshTargetDevice = devices.find(device => this.deviceMatches(device.productId, targetProductId));
 					
 					if (freshTargetDevice) {
-						streamDeck.logger.info(`Found similar device after cache refresh: ${freshTargetDevice.name} (0x${freshTargetDevice.productId.toString(16)})`);
+						streamDeck.logger.info(`[   Service] Found similar device after cache refresh: ${freshTargetDevice.name} (0x${freshTargetDevice.productId.toString(16)})`);
 						// Retry with the new device ID
 						const retryArgs = [`0x${freshTargetDevice.productId.toString(16)}`];
 						return await this.sendMessage('battery', retryArgs, 6000);
 					} else {
-						streamDeck.logger.warn(`No matching device found after cache refresh for 0x${targetProductId.toString(16)}`);
+						streamDeck.logger.warn(`[   Service] No matching device found after cache refresh for 0x${targetProductId.toString(16)}`);
 						return null;
 					}
 				} catch (retryError) {
-					streamDeck.logger.error('Failed to get battery info after cache refresh:', retryError);
+					streamDeck.logger.error('[   Service] Failed to get battery info after cache refresh:', retryError);
 					return null;
 				}
 			}
@@ -277,7 +277,7 @@ export class RazerBatteryService {
 			this.retryAttempted = false;
 			return result;
 		} catch (error) {
-			streamDeck.logger.error('Failed to get battery info:', error);
+			streamDeck.logger.error('[   Service] Failed to get battery info:', error);
 			return null;
 		}
 	}
@@ -292,11 +292,11 @@ export class RazerBatteryService {
 			const now = Date.now();
 			const cachedBattery = this.batteryCache.get(targetProductId);
 			if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
-				streamDeck.logger.info(`Using cached battery for ${deviceName} (${now - cachedBattery.timestamp}ms old)`);
+				streamDeck.logger.info(`[   Service] Using cached battery for ${deviceName} (${now - cachedBattery.timestamp}ms old)`);
 				return cachedBattery;
 			}
 			
-			streamDeck.logger.info(`Getting battery for cached device: ${deviceName}`);
+			streamDeck.logger.info(`[   Service] Getting battery for cached device: ${deviceName}`);
 			
 			const args = [`0x${targetProductId.toString(16)}`];
 			const result = await this.sendMessage('battery', args, 6000);
@@ -313,7 +313,7 @@ export class RazerBatteryService {
 			this.retryAttempted = false;
 			return result;
 		} catch (error) {
-			streamDeck.logger.error('Failed to get battery info internal:', error);
+			streamDeck.logger.error('[   Service] Failed to get battery info internal:', error);
 			return null;
 		}
 	}
@@ -354,14 +354,14 @@ export class RazerBatteryService {
 			const targetDevice = devices.find(device => isTargetDevice(device.productId));
 			
 			if (!targetDevice) {
-				streamDeck.logger.info('No matching device found');
+				streamDeck.logger.info('[   Service] No matching device found');
 				return null;
 			}
 
 			// Call internal battery method that skips device verification since we already found it
 			return await this.getBatteryInfoInternal(targetDevice.productId, targetDevice.name);
 		} catch (error) {
-			streamDeck.logger.error('Failed to get battery info for device type:', error);
+			streamDeck.logger.error('[   Service] Failed to get battery info for device type:', error);
 			return null;
 		}
 	}
@@ -374,7 +374,7 @@ export class RazerBatteryService {
 			return;
 		}
 
-		streamDeck.logger.info('Shutting down USB worker...');
+		streamDeck.logger.info('[   Service] Shutting down USB worker...');
 		this.isShuttingDown = true;
 
 		// Clear battery cache only (USB worker handles device caching)
@@ -394,12 +394,12 @@ export class RazerBatteryService {
 		// Force kill after 5 seconds if still running
 		setTimeout(() => {
 			if (this.worker && !this.worker.killed) {
-				streamDeck.logger.warn('Force killing worker process');
+				streamDeck.logger.warn('[   Service] Force killing worker process');
 				this.worker.kill('SIGKILL');
 			}
 		}, 5000);
 
 		this.worker = null;
-		streamDeck.logger.info('USB worker shutdown complete'); // Changed from debug to info
+		streamDeck.logger.info('[   Service] USB worker shutdown complete'); // Changed from debug to info
 	}
 }
