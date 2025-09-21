@@ -217,16 +217,15 @@ async function getBatteryFromKeyboard(device, productId) {
  * Invalidates the persistent device cache, forcing fresh enumeration on next request
  */
 function invalidateDeviceCache() {
-	console.log('Invalidating device cache...');
 	cachedDevices = null;
 	deviceCacheTimestamp = null;
 }
 
 /**
- * Finds all Razer devices using WebUSB with persistent caching
+ * Finds all Razer devices using WebUSB with simple caching
  */
 async function getAllRazerDevices() {
-	// Check if we have cached devices (no TTL - persist until invalidated)
+	// Check if we have cached devices - use them until explicitly invalidated
 	if (cachedDevices && deviceCacheTimestamp) {
 		const cacheAge = Date.now() - deviceCacheTimestamp;
 		console.log(`Using cached devices (${cachedDevices.length} devices, cached for ${cacheAge}ms)`);
@@ -244,10 +243,11 @@ async function getAllRazerDevices() {
 	
 	try {
 		const result = await deviceEnumerationPromise;
-		// Cache the results persistently
+		
+		// Cache the results persistently (until explicitly invalidated)
 		cachedDevices = result;
 		deviceCacheTimestamp = Date.now();
-		console.log(`Cached ${result.length} devices persistently (until invalidated)`);
+		console.log(`Cached ${result.length} devices (until explicitly invalidated)`);
 		return result;
 	} finally {
 		// Clear the promise when done (success or failure)
@@ -374,8 +374,6 @@ function createRazerRequest(mouse, command) {
  */
 async function getAvailableDevices() {
 	try {
-		console.log('Looking for all Razer devices...');
-		
 		const devices = await getAllRazerDevices();
 		
 		if (devices.length === 0) {
@@ -392,11 +390,9 @@ async function getAvailableDevices() {
 			};
 		});
 
-		console.log(`Found ${deviceList.length} supported Razer devices:`);
-		deviceList.forEach(device => {
-			console.log(`  - ${device.name} (${device.id})`);
-		});
-
+		// Only log device list if this was a fresh enumeration (not cached)
+		// The getAllRazerDevices() function already logs when using cached vs fresh data
+		
 		return deviceList;
 
 	} catch (error) {
@@ -462,9 +458,13 @@ async function getBatteryLevel(targetProductId = null) {
 			if (error.message && (
 				error.message.includes('LIBUSB_ERROR_NO_DEVICE') ||
 				error.message.includes('LIBUSB_ERROR_NOT_FOUND') ||
-				error.message.includes('open error')
+				error.message.includes('LIBUSB_ERROR_ACCESS') ||
+				error.message.includes('LIBUSB_ERROR_IO') ||
+				error.message.includes('open error') ||
+				error.message.includes('Device not found') ||
+				error.message.includes('No such device')
 			)) {
-				console.log(`Device communication failed, invalidating device cache and retrying...`);
+				console.log(`Device communication failed (${error.message}), invalidating cache and retrying once...`);
 				invalidateDeviceCache();
 				
 				// Try once more with fresh device enumeration
@@ -659,6 +659,10 @@ if (require.main === module) {
 						const mouseDevices = allDevices.filter(device => !isKeyboardDevice(device.productId));
 						if (mouseDevices.length > 0) {
 							result = await getBatteryFromDevice(mouseDevices[0]);
+						} else {
+							// No mouse devices found - invalidate cache to force fresh enumeration
+							console.log('No mouse devices found, invalidating cache...');
+							invalidateDeviceCache();
 						}
 						break;
 						
@@ -668,7 +672,17 @@ if (require.main === module) {
 						const keyboardDevices = allDevicesKb.filter(device => isKeyboardDevice(device.productId));
 						if (keyboardDevices.length > 0) {
 							result = await getBatteryFromDevice(keyboardDevices[0]);
+						} else {
+							// No keyboard devices found - invalidate cache to force fresh enumeration
+							console.log('No keyboard devices found, invalidating cache...');
+							invalidateDeviceCache();
 						}
+						break;
+					
+					case 'invalidate':
+						console.log('Invalidating device cache...');
+						invalidateDeviceCache();
+						result = { cache_invalidated: true };
 						break;
 						
 					default:

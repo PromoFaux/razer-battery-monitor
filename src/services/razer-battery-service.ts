@@ -17,17 +17,6 @@ export class RazerBatteryService {
 		timeout: NodeJS.Timeout;
 	}>();
 	private isShuttingDown = false;
-	
-	// Battery status caching per device (short-term cache to avoid redundant queries)
-	private batteryCache = new Map<number, {
-		batteryLevel: number | null,
-		deviceName: string,
-		productId: number,
-		isCharging?: boolean,
-		timestamp: number
-	}>();
-	private readonly BATTERY_CACHE_DURATION = 10000; // Cache battery status for 10 seconds
-	private retryAttempted = false; // Prevent infinite retry loops
 
 	/**
 	 * Starts the persistent worker process if not already running.
@@ -175,28 +164,29 @@ export class RazerBatteryService {
 	/**
 	 * Invalidates cached data when devices change.
 	 */
-	invalidateDeviceCache(): void {
-		streamDeck.logger.info('[   Service] Device cache invalidated - clearing battery cache');
-		this.batteryCache.clear(); // Clear battery cache when devices change
+	async invalidateDeviceCache(): Promise<void> {
+		try {
+			await this.sendMessage('invalidate', [], 3000);
+			streamDeck.logger.info('[   Service] Device cache invalidated');
+		} catch (error) {
+			streamDeck.logger.error('[   Service] Failed to invalidate device cache:', error);
+		}
 	}
 
 	/**
-	 * Gets a specific device, with automatic refresh if not found.
+	 * Public method to invalidate the device cache.
+	 * Alias for invalidateDeviceCache for easier access from actions.
+	 */
+	async invalidateCache(): Promise<void> {
+		return await this.invalidateDeviceCache();
+	}
+
+	/**
+	 * Gets a specific device by product ID.
 	 */
 	private async findDevice(productId: number): Promise<{productId: number, name: string, id: string} | null> {
-		// First try to find device
-		let devices = await this.getAvailableDevices();
-		let targetDevice = devices.find(device => device.productId === productId);
-		
-		if (!targetDevice) {
-			// Device not found, try refreshing once
-			streamDeck.logger.info(`[   Service] Device 0x${productId.toString(16)} not found, refreshing...`);
-			this.invalidateDeviceCache();
-			devices = await this.getAvailableDevices();
-			targetDevice = devices.find(device => device.productId === productId);
-		}
-		
-		return targetDevice || null;
+		const devices = await this.getAvailableDevices();
+		return devices.find(device => device.productId === productId) || null;
 	}
 
 	/**
@@ -220,15 +210,7 @@ export class RazerBatteryService {
 					return null;
 				}
 				
-				// Check battery cache first (short-term cache to avoid redundant USB queries)
-				const now = Date.now();
-				const cachedBattery = this.batteryCache.get(targetProductId);
-				if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
-					streamDeck.logger.info(`[   Service] Using cached battery for ${targetDevice.name} (${now - cachedBattery.timestamp}ms old)`);
-					return cachedBattery;
-				}
-				
-				streamDeck.logger.info(`[   Service] Getting battery for cached device: ${targetDevice.name}`); // Changed from debug to info
+				streamDeck.logger.info(`[   Service] Getting battery for device: ${targetDevice.name}`); // Changed from debug to info
 			}
 
 			const args = [];
@@ -236,46 +218,7 @@ export class RazerBatteryService {
 				args.push(`0x${targetProductId.toString(16)}`);
 			}
 			
-			const result = await this.sendMessage('battery', args, 6000);
-			
-			// Cache the result if we have a specific device
-			if (result && targetProductId !== undefined) {
-				this.batteryCache.set(targetProductId, {
-					...result,
-					timestamp: Date.now()
-				});
-			}
-			
-			// If the worker returns null for a specific device (device not found), 
-			// but we expected it to exist, invalidate cache and retry once
-			if (result === null && targetProductId !== undefined && !this.retryAttempted) {
-				streamDeck.logger.info(`[   Service] Battery query failed for device 0x${targetProductId.toString(16)} (device may have changed mode), invalidating cache and retrying...`);
-				this.retryAttempted = true; // Prevent infinite retry loop
-				this.invalidateDeviceCache();
-				
-				try {
-					// Retry with fresh device cache
-					const devices = await this.getAvailableDevices();
-					const freshTargetDevice = devices.find(device => this.deviceMatches(device.productId, targetProductId));
-					
-					if (freshTargetDevice) {
-						streamDeck.logger.info(`[   Service] Found similar device after cache refresh: ${freshTargetDevice.name} (0x${freshTargetDevice.productId.toString(16)})`);
-						// Retry with the new device ID
-						const retryArgs = [`0x${freshTargetDevice.productId.toString(16)}`];
-						return await this.sendMessage('battery', retryArgs, 6000);
-					} else {
-						streamDeck.logger.warn(`[   Service] No matching device found after cache refresh for 0x${targetProductId.toString(16)}`);
-						return null;
-					}
-				} catch (retryError) {
-					streamDeck.logger.error('[   Service] Failed to get battery info after cache refresh:', retryError);
-					return null;
-				}
-			}
-			
-			// Reset retry flag after successful operation
-			this.retryAttempted = false;
-			return result;
+			return await this.sendMessage('battery', args, 6000);
 		} catch (error) {
 			streamDeck.logger.error('[   Service] Failed to get battery info:', error);
 			return null;
@@ -283,85 +226,105 @@ export class RazerBatteryService {
 	}
 
 	/**
-	 * Internal method to get battery info when we already know the device exists.
-	 * Skips device verification to avoid redundant getAvailableDevices() calls.
+	 * Gets battery information for the first available mouse device.
+	 * Uses simple cache invalidation: if no mouse found or communication failed, invalidate cache and retry once.
 	 */
-	private async getBatteryInfoInternal(targetProductId: number, deviceName: string): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	async getMouseBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
 		try {
-			// Check battery cache first (short-term cache to avoid redundant USB queries)
-			const now = Date.now();
-			const cachedBattery = this.batteryCache.get(targetProductId);
-			if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
-				streamDeck.logger.info(`[   Service] Using cached battery for ${deviceName} (${now - cachedBattery.timestamp}ms old)`);
-				return cachedBattery;
+			// Force cache invalidation if requested (manual refresh button press)  
+			if (forceRefresh) {
+				streamDeck.logger.info('[   Service] Manual refresh - invalidating cache...');
+				await this.invalidateDeviceCache();
+			}
+
+		// Try to get mouse battery info
+		let result = await this.sendMessage('mouse');
+		
+		// If no mouse found, or result is null/invalid, and we haven't already invalidated the cache, try once more with fresh enumeration
+		// Note: Don't treat charging mice (batteryLevel: null, isCharging: true) as missing devices
+		if ((!result || (result.batteryLevel === null && !result.isCharging)) && !forceRefresh) {
+			streamDeck.logger.info('[   Service] No mouse found or communication failed - invalidating cache and retrying...');
+			await this.invalidateDeviceCache();
+			result = await this.sendMessage('mouse');
+		}
+		
+		// Accept valid results: either have battery level OR are charging
+		if (result && (result.batteryLevel !== null || result.isCharging)) {
+			// Log appropriate message based on device state
+			if (result.isCharging && result.batteryLevel === null) {
+				streamDeck.logger.info(`[   Service] Found charging mouse: ${result.deviceName || 'Unknown'}`);
+			} else {
+				streamDeck.logger.info(`[   Service] Found mouse: ${result.deviceName || 'Unknown'}`);
+				if (result.batteryLevel !== null) {
+					streamDeck.logger.info(`[   Service] Mouse battery: ${Math.round(result.batteryLevel)}%`);
+				}
 			}
 			
-			streamDeck.logger.info(`[   Service] Getting battery for cached device: ${deviceName}`);
-			
-			const args = [`0x${targetProductId.toString(16)}`];
-			const result = await this.sendMessage('battery', args, 6000);
-			
-			// Cache the result
-			if (result) {
-				this.batteryCache.set(targetProductId, {
-					...result,
-					timestamp: Date.now()
-				});
-			}
-			
-			// Reset retry flag after successful operation
-			this.retryAttempted = false;
-			return result;
+			return {
+				batteryLevel: result.batteryLevel,
+				deviceName: result.deviceName || 'Unknown Mouse',
+				productId: result.productId || 0,
+				isCharging: result.isCharging
+			};
+		}
+		
+		streamDeck.logger.info('[   Service] No mouse devices found, invalidating cache');
+		await this.invalidateDeviceCache();
+		return null;
 		} catch (error) {
-			streamDeck.logger.error('[   Service] Failed to get battery info internal:', error);
+			streamDeck.logger.error('[   Service] Failed to get mouse battery info:', error);
 			return null;
 		}
 	}
 
 	/**
-	 * Checks if two device product IDs represent the same physical device in different modes.
-	 * Only includes confirmed device pairs - add more as they're discovered and verified.
+	 * Gets battery information for the first available keyboard device.
+	 * Uses simple cache invalidation: if no keyboard found or communication failed, invalidate cache and retry once.
 	 */
-	private deviceMatches(deviceProductId: number, targetProductId: number): boolean {
-		// Direct match
-		if (deviceProductId === targetProductId) {
-			return true;
-		}
-		
-		// Check for known device mode pairs (wired/wireless variants of same device)
-		// Only include pairs that have been confirmed through actual testing
-		const confirmedDevicePairs = [
-			[0x7a, 0x7b], // Razer Viper Ultimate (Wired/Wireless) - CONFIRMED
-			// Add more pairs here as they're discovered and verified
-			// [0x007C, 0x007D], // Razer DeathAdder V2 Pro (Wired/Wireless) - UNCONFIRMED
-			// [0x0086, 0x0088], // Razer Basilisk Ultimate (Wired/Wireless) - UNCONFIRMED
-		];
-		
-		return confirmedDevicePairs.some(pair => 
-			(pair[0] === deviceProductId && pair[1] === targetProductId) ||
-			(pair[1] === deviceProductId && pair[0] === targetProductId)
-		);
-	}
-
-	/**
-	 * Gets battery information for the first device matching the filter function.
-	 * This is more efficient than getting all devices and filtering client-side.
-	 */
-	async getBatteryInfoForDeviceType(isTargetDevice: (productId: number) => boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	async getKeyboardBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
 		try {
-			// Get available devices from cache
-			const devices = await this.getAvailableDevices();
-			const targetDevice = devices.find(device => isTargetDevice(device.productId));
-			
-			if (!targetDevice) {
-				streamDeck.logger.info('[   Service] No matching device found');
-				return null;
+			// Force cache invalidation if requested (manual refresh button press)
+			if (forceRefresh) {
+				streamDeck.logger.info('[   Service] Manual refresh - invalidating cache...');
+				await this.invalidateDeviceCache();
 			}
 
-			// Call internal battery method that skips device verification since we already found it
-			return await this.getBatteryInfoInternal(targetDevice.productId, targetDevice.name);
+		// Try to get keyboard battery info
+		let result = await this.sendMessage('keyboard');
+		
+		// If no keyboard found, or result is null/invalid, and we haven't already invalidated the cache, try once more with fresh enumeration
+		// Note: Don't treat charging keyboards (batteryLevel: null, isCharging: true) as missing devices
+		if ((!result || (result.batteryLevel === null && !result.isCharging)) && !forceRefresh) {
+			streamDeck.logger.info('[   Service] No keyboard found or communication failed - invalidating cache and retrying...');
+			await this.invalidateDeviceCache();
+			result = await this.sendMessage('keyboard');
+		}
+		
+		// Accept valid results: either have battery level OR are charging
+		if (result && (result.batteryLevel !== null || result.isCharging)) {
+			// Log appropriate message based on device state
+			if (result.isCharging && result.batteryLevel === null) {
+				streamDeck.logger.info(`[   Service] Found charging keyboard: ${result.deviceName || 'Unknown'}`);
+			} else {
+				streamDeck.logger.info(`[   Service] Found keyboard: ${result.deviceName || 'Unknown'}`);
+				if (result.batteryLevel !== null) {
+					streamDeck.logger.info(`[   Service] Keyboard battery: ${Math.round(result.batteryLevel)}%`);
+				}
+			}
+			
+			return {
+				batteryLevel: result.batteryLevel,
+				deviceName: result.deviceName || 'Unknown Keyboard',
+				productId: result.productId || 0,
+				isCharging: result.isCharging
+			};
+		}
+		
+		streamDeck.logger.info('[   Service] No keyboard devices found, invalidating cache');
+		await this.invalidateDeviceCache();
+		return null;
 		} catch (error) {
-			streamDeck.logger.error('[   Service] Failed to get battery info for device type:', error);
+			streamDeck.logger.error('[   Service] Failed to get keyboard battery info:', error);
 			return null;
 		}
 	}
@@ -376,10 +339,6 @@ export class RazerBatteryService {
 
 		streamDeck.logger.info('[   Service] Shutting down USB worker...');
 		this.isShuttingDown = true;
-
-		// Clear battery cache only (USB worker handles device caching)
-		this.batteryCache.clear();
-		this.retryAttempted = false;
 
 		// Cancel all pending messages
 		for (const [id, pendingMessage] of this.pendingMessages) {
