@@ -26,7 +26,7 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 		
 		// Set up periodic updates with device-specific default interval
 		const updateIntervalMs = (ev.payload.settings.updateInterval ?? this.getDefaultInterval()) * 1000;
-		streamDeck.logger.debug(`${deviceType} battery: ${updateIntervalMs}ms update interval`);
+		streamDeck.logger.info(`${deviceType} battery: ${updateIntervalMs}ms update interval`); // Changed from debug to info
 		
 		   this.updateInterval = setInterval(async () => {
 			   await this.updateBatteryDisplay(ev);
@@ -45,11 +45,14 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 
 	/**
 	 * Handles key press events. Immediately updates the battery level.
+	 * Also invalidates device cache in case user connected/disconnected devices.
 	 */
 	   override async onKeyDown(ev: KeyDownEvent<T>): Promise<void> {
 		   const deviceType = this.getDeviceType();
-		   streamDeck.logger.info(`${deviceType} battery: Manual refresh`);
+		   streamDeck.logger.info(`${deviceType} battery: Manual refresh (invalidating device cache)`);
 		   try {
+			   // On manual refresh, invalidate device cache in case user connected/disconnected devices
+			   this.batteryService.invalidateDeviceCache();
 			   await this.updateBatteryDisplay(ev);
 		   } catch (error) {
 			   streamDeck.logger.error(`${deviceType} battery: Manual update failed:`, error);
@@ -62,39 +65,37 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 	   protected async updateBatteryDisplay(ev: WillAppearEvent<T> | KeyDownEvent<T>): Promise<void> {
 		   const deviceType = this.getDeviceType();
 		   try {
-			   // Get devices matching this action type
-			   const devices = await this.batteryService.getAvailableDevices();
-			   const targetDevice = devices.find(device => this.isTargetDevice(device.productId));
-			   if (targetDevice) {
-				   streamDeck.logger.debug(`Found ${deviceType.toLowerCase()}: ${targetDevice.name}`);
-				   const batteryInfo = await this.batteryService.getBatteryInfo(targetDevice.productId);
-				   // Set device name, batteryLevel, and charging state in settings so PI can receive them
+			   // Get battery info for the first device matching our type - this is more efficient
+			   // than getting all devices and filtering client-side
+			   const batteryInfo = await this.batteryService.getBatteryInfoForDeviceType(
+				   (productId) => this.isTargetDevice(productId)
+			   );
+			   
+		   if (batteryInfo) {
+			   streamDeck.logger.info(`Found ${deviceType.toLowerCase()}: ${batteryInfo.deviceName}`);				   // Set device name, batteryLevel, and charging state in settings so PI can receive them
 				   const newSettings = {
 					   ...ev.payload.settings,
-					   deviceName: targetDevice.name,
-					   batteryLevel: batteryInfo?.batteryLevel ?? null,
-					   charging: batteryInfo?.isCharging ?? null
+					   deviceName: batteryInfo.deviceName,
+					   batteryLevel: batteryInfo.batteryLevel,
+					   charging: batteryInfo.isCharging ?? null
 				   };
 				   await ev.action.setSettings(newSettings);
-				   if (batteryInfo !== null) {
-					   if (batteryInfo.isCharging && batteryInfo.batteryLevel === null) {
-						   // Device is charging but battery level is unreliable
-						   const displayText = this.formatDisplayText(0, true);
-						   streamDeck.logger.info(`${deviceType} battery: charging (level unavailable)`);
-						   await ev.action.setTitle(displayText);
-					   } else if (batteryInfo.batteryLevel !== null) {
-						   // Normal case with valid battery level
-						   const batteryPercent = Math.round(batteryInfo.batteryLevel);
-						   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false);
-						   streamDeck.logger.info(`${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
-						   await ev.action.setTitle(displayText);
-						   // Set battery level icon
-						   const iconPath = this.getBatteryIconPath(batteryInfo.batteryLevel);
-						   if (iconPath) {
-							   await ev.action.setImage(iconPath);
-						   }
-					   } else {
-						   await ev.action.setTitle(`${this.getDisplayPrefix()}\nNo Data`);
+				   
+				   if (batteryInfo.isCharging && batteryInfo.batteryLevel === null) {
+					   // Device is charging but battery level is unreliable
+					   const displayText = this.formatDisplayText(0, true);
+					   streamDeck.logger.info(`${deviceType} battery: charging (level unavailable)`);
+					   await ev.action.setTitle(displayText);
+				   } else if (batteryInfo.batteryLevel !== null) {
+					   // Normal case with valid battery level
+					   const batteryPercent = Math.round(batteryInfo.batteryLevel);
+					   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false);
+					   streamDeck.logger.info(`${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
+					   await ev.action.setTitle(displayText);
+					   // Set battery level icon
+					   const iconPath = this.getBatteryIconPath(batteryInfo.batteryLevel);
+					   if (iconPath) {
+						   await ev.action.setImage(iconPath);
 					   }
 				   } else {
 					   await ev.action.setTitle(`${this.getDisplayPrefix()}\nNo Data`);
