@@ -17,13 +17,6 @@ export class RazerBatteryService {
 		timeout: NodeJS.Timeout;
 	}>();
 	private isShuttingDown = false;
-
-	// Device list caching
-	private deviceListCache: Array<{productId: number, name: string, id: string}> | null = null;
-	private deviceListCacheTime = 0;
-	private readonly DEVICE_CACHE_RETRY_INTERVAL = 5000; // Retry failed requests after 5 seconds
-	private lastDeviceListError = 0;
-	private deviceEnumerationPromise: Promise<Array<{productId: number, name: string, id: string}>> | null = null; // Prevent concurrent enumerations
 	
 	// Battery status caching per device (short-term cache to avoid redundant queries)
 	private batteryCache = new Map<number, {
@@ -34,6 +27,7 @@ export class RazerBatteryService {
 		timestamp: number
 	}>();
 	private readonly BATTERY_CACHE_DURATION = 10000; // Cache battery status for 10 seconds
+	private retryAttempted = false; // Prevent infinite retry loops
 
 	/**
 	 * Starts the persistent worker process if not already running.
@@ -163,104 +157,40 @@ export class RazerBatteryService {
 	}
 
 	/**
-	 * Gets available Razer devices on the system with intelligent caching.
-	 * Device list is cached until manually invalidated or plugin restart.
+	 * Gets the list of available Razer devices.
+	 * Now directly delegates to the USB worker which handles caching.
 	 */
 	async getAvailableDevices(): Promise<Array<{productId: number, name: string, id: string}>> {
-		const now = Date.now();
-		
-		// Return cached result if available (cache never expires automatically)
-		if (this.deviceListCache !== null) {
-			streamDeck.logger.info(`Using cached device list (${this.deviceListCache.length} devices, cached for ${now - this.deviceListCacheTime}ms)`); // Changed from debug to info
-			return this.deviceListCache;
-		}
-
-		// If there's already an enumeration in progress, wait for it
-		if (this.deviceEnumerationPromise !== null) {
-			streamDeck.logger.info('Device enumeration already in progress, waiting for it to complete...');
-			try {
-				return await this.deviceEnumerationPromise;
-			} catch (error) {
-				// If the concurrent enumeration failed, we'll start a new one below
-				streamDeck.logger.warn('Concurrent device enumeration failed, starting new enumeration:', error);
-				this.deviceEnumerationPromise = null;
-			}
-		}
-
-		// Don't retry too frequently if the last request failed
-		if (this.lastDeviceListError > 0 && 
-			(now - this.lastDeviceListError) < this.DEVICE_CACHE_RETRY_INTERVAL) {
-			streamDeck.logger.info(`Skipping device list refresh, too soon after error (${now - this.lastDeviceListError}ms ago)`); // Changed from debug to info
-			return [];
-		}
-
-		// Start new enumeration
-		this.deviceEnumerationPromise = this.performDeviceEnumeration();
-		
 		try {
-			const devices = await this.deviceEnumerationPromise;
-			this.deviceEnumerationPromise = null; // Clear the promise on success
+			const result = await this.sendMessage('list', [], 10000);
+			const devices = result.devices || [];
+			streamDeck.logger.debug(`Retrieved device list: found ${devices.length} devices`);
 			return devices;
 		} catch (error) {
-			this.deviceEnumerationPromise = null; // Clear the promise on error
+			streamDeck.logger.error('Failed to get device list:', error);
 			throw error;
 		}
 	}
 
 	/**
-	 * Performs the actual device enumeration.
-	 */
-	private async performDeviceEnumeration(): Promise<Array<{productId: number, name: string, id: string}>> {
-		const now = Date.now();
-		
-		try {
-			streamDeck.logger.info('Refreshing device list cache...');
-			const result = await this.sendMessage('list', [], 10000); // Increased timeout from 5s to 10s
-			const devices = result.devices || [];
-			
-			// Update cache
-			this.deviceListCache = devices;
-			this.deviceListCacheTime = now;
-			this.lastDeviceListError = 0; // Clear error timestamp on success
-			
-			streamDeck.logger.info(`Device list cache updated: found ${devices.length} devices`);
-			return devices;
-		} catch (error) {
-			streamDeck.logger.error('Failed to get available devices:', error);
-			this.lastDeviceListError = now;
-			
-			// Return empty array on error since we have no stale cache to fall back to
-			return [];
-		}
-	}
-
-	/**
-	 * Invalidates the device list cache, forcing a refresh on the next request.
-	 * This should be called when:
-	 * - User manually refreshes (key press)
-	 * - A specific device is expected but not found
-	 * - User has connected/disconnected a device
+	 * Invalidates cached data when devices change.
 	 */
 	invalidateDeviceCache(): void {
-		streamDeck.logger.info('Device list cache invalidated - will refresh on next request');
-		this.deviceListCache = null;
-		this.deviceListCacheTime = 0;
-		this.lastDeviceListError = 0;
-		this.deviceEnumerationPromise = null; // Clear any ongoing enumeration
+		streamDeck.logger.info('Device cache invalidated - clearing battery cache');
 		this.batteryCache.clear(); // Clear battery cache when devices change
 	}
 
 	/**
-	 * Gets a specific device from the cache, refreshing if not found.
+	 * Gets a specific device, with automatic refresh if not found.
 	 */
 	private async findDevice(productId: number): Promise<{productId: number, name: string, id: string} | null> {
-		// First try cached devices
+		// First try to find device
 		let devices = await this.getAvailableDevices();
 		let targetDevice = devices.find(device => device.productId === productId);
 		
-		if (!targetDevice && this.deviceListCache !== null) {
-			// Device not found in cache, try refreshing once
-			streamDeck.logger.info(`Device 0x${productId.toString(16)} not found in cache, refreshing...`); // Changed from debug to info
+		if (!targetDevice) {
+			// Device not found, try refreshing once
+			streamDeck.logger.info(`Device 0x${productId.toString(16)} not found, refreshing...`);
 			this.invalidateDeviceCache();
 			devices = await this.getAvailableDevices();
 			targetDevice = devices.find(device => device.productId === productId);
@@ -317,9 +247,10 @@ export class RazerBatteryService {
 			}
 			
 			// If the worker returns null for a specific device (device not found), 
-			// but our cache said it should exist, invalidate cache and retry once
-			if (result === null && targetProductId !== undefined && this.deviceListCache !== null) {
+			// but we expected it to exist, invalidate cache and retry once
+			if (result === null && targetProductId !== undefined && !this.retryAttempted) {
 				streamDeck.logger.info(`Battery query failed for device 0x${targetProductId.toString(16)} (device may have changed mode), invalidating cache and retrying...`);
+				this.retryAttempted = true; // Prevent infinite retry loop
 				this.invalidateDeviceCache();
 				
 				try {
@@ -342,9 +273,47 @@ export class RazerBatteryService {
 				}
 			}
 			
+			// Reset retry flag after successful operation
+			this.retryAttempted = false;
 			return result;
 		} catch (error) {
 			streamDeck.logger.error('Failed to get battery info:', error);
+			return null;
+		}
+	}
+
+	/**
+	 * Internal method to get battery info when we already know the device exists.
+	 * Skips device verification to avoid redundant getAvailableDevices() calls.
+	 */
+	private async getBatteryInfoInternal(targetProductId: number, deviceName: string): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+		try {
+			// Check battery cache first (short-term cache to avoid redundant USB queries)
+			const now = Date.now();
+			const cachedBattery = this.batteryCache.get(targetProductId);
+			if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
+				streamDeck.logger.info(`Using cached battery for ${deviceName} (${now - cachedBattery.timestamp}ms old)`);
+				return cachedBattery;
+			}
+			
+			streamDeck.logger.info(`Getting battery for cached device: ${deviceName}`);
+			
+			const args = [`0x${targetProductId.toString(16)}`];
+			const result = await this.sendMessage('battery', args, 6000);
+			
+			// Cache the result
+			if (result) {
+				this.batteryCache.set(targetProductId, {
+					...result,
+					timestamp: Date.now()
+				});
+			}
+			
+			// Reset retry flag after successful operation
+			this.retryAttempted = false;
+			return result;
+		} catch (error) {
+			streamDeck.logger.error('Failed to get battery info internal:', error);
 			return null;
 		}
 	}
@@ -385,12 +354,12 @@ export class RazerBatteryService {
 			const targetDevice = devices.find(device => isTargetDevice(device.productId));
 			
 			if (!targetDevice) {
-				streamDeck.logger.info('No matching device found in cache'); // Changed from debug to info
+				streamDeck.logger.info('No matching device found');
 				return null;
 			}
 
-			streamDeck.logger.info(`Getting battery for ${targetDevice.name} (0x${targetDevice.productId.toString(16)})`); // Changed from debug to info;
-			return await this.getBatteryInfo(targetDevice.productId);
+			// Call internal battery method that skips device verification since we already found it
+			return await this.getBatteryInfoInternal(targetDevice.productId, targetDevice.name);
 		} catch (error) {
 			streamDeck.logger.error('Failed to get battery info for device type:', error);
 			return null;
@@ -405,13 +374,12 @@ export class RazerBatteryService {
 			return;
 		}
 
-		streamDeck.logger.info('Shutting down USB worker...'); // Changed from debug to info
+		streamDeck.logger.info('Shutting down USB worker...');
 		this.isShuttingDown = true;
 
-		// Clear caches
-		this.deviceListCache = null;
-		this.deviceListCacheTime = 0;
-		this.lastDeviceListError = 0;
+		// Clear battery cache only (USB worker handles device caching)
+		this.batteryCache.clear();
+		this.retryAttempted = false;
 
 		// Cancel all pending messages
 		for (const [id, pendingMessage] of this.pendingMessages) {

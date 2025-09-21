@@ -1,19 +1,16 @@
 // CommonJS module for USB communication to work around ES module issues
 const { WebUSB } = require('usb');
 
-/**
- * Logging function that outputs to stdout for capture by the main Stream Deck service
- * These logs are captured by razer-battery-service.ts and forwarded to Stream Deck logs
- */
-function log(message) {
-	console.log(message);
-}
-
 // Razer product definitions with their transaction IDs (from OpenRazer + test.js)
 const RAZER_VENDOR_ID = 0x1532;
 
 // USB Worker concurrent enumeration protection
 let deviceEnumerationPromise = null;
+
+// USB Worker device caching
+let cachedDevices = null;
+let deviceCacheTimestamp = null;
+// No TTL - cache persists until explicitly invalidated (devices don't change often)
 
 // Device categories for better organization
 const RAZER_MICE = {
@@ -147,16 +144,12 @@ function isKeyboardDevice(productId) {
 	return productId in RAZER_KEYBOARDS;
 }
 
-
-
-
-
 /**
  * Try to get battery level from keyboard using single-request approach with format detection
  * This is more power-efficient since keyboards use response format to indicate charging status
  */
 async function getBatteryFromKeyboard(device, productId) {
-	console.log(`USB Worker: Querying keyboard battery for 0x${productId.toString(16)}`);
+	console.log(`Querying keyboard battery for 0x${productId.toString(16)}`);
 	const productInfo = RAZER_PRODUCTS[productId];
 	
 	try {
@@ -186,12 +179,12 @@ async function getBatteryFromKeyboard(device, productId) {
 			const responseFormat = responseArray[0];
 			const rawBattery = batteryReply.data.getUint8(9);
 			
-			console.log(`USB Worker: Response format: 0x${responseFormat.toString(16).padStart(2, '0')}, raw battery: ${rawBattery}`);
+			console.log(`Response format: 0x${responseFormat.toString(16).padStart(2, '0')}, raw battery: ${rawBattery}`);
 			
 			// Check response format to detect charging state
 			if (responseFormat === 0x04) {
 				// 0x04 format = charging (battery level unreliable)
-				console.log(`USB Worker: Keyboard is charging (0x04 response format detected)`);
+				console.log(`Keyboard is charging (0x04 response format detected)`);
 				return {
 					batteryLevel: null, // Battery percentage not reliable while charging
 					isCharging: true,
@@ -201,7 +194,7 @@ async function getBatteryFromKeyboard(device, productId) {
 			} else {
 				// Normal response (0x02 format) = not charging, battery level is accurate
 				const batteryLevel = (rawBattery / 255 * 100);
-				console.log(`USB Worker: Keyboard battery: ${batteryLevel.toFixed(1)}%`);
+				console.log(`Keyboard battery: ${batteryLevel.toFixed(1)}%`);
 				
 				return {
 					batteryLevel: parseFloat(batteryLevel.toFixed(1)),
@@ -212,22 +205,37 @@ async function getBatteryFromKeyboard(device, productId) {
 			}
 		}
 
-		console.log(`USB Worker: Invalid keyboard response`);
+		console.log(`Invalid keyboard response`);
 		return null;
 
 	} catch (error) {
-		console.log(`USB Worker: Keyboard battery error: ${error}`);
+		console.log(`Keyboard battery error: ${error}`);
 		return null;
 	}
 }
+/**
+ * Invalidates the persistent device cache, forcing fresh enumeration on next request
+ */
+function invalidateDeviceCache() {
+	console.log('Invalidating device cache...');
+	cachedDevices = null;
+	deviceCacheTimestamp = null;
+}
 
 /**
- * Finds all Razer devices using WebUSB
+ * Finds all Razer devices using WebUSB with persistent caching
  */
 async function getAllRazerDevices() {
+	// Check if we have cached devices (no TTL - persist until invalidated)
+	if (cachedDevices && deviceCacheTimestamp) {
+		const cacheAge = Date.now() - deviceCacheTimestamp;
+		console.log(`Using cached devices (${cachedDevices.length} devices, cached for ${cacheAge}ms)`);
+		return cachedDevices;
+	}
+
 	// Check if device enumeration is already in progress
 	if (deviceEnumerationPromise) {
-		console.log('USB Worker: Device enumeration already in progress, waiting for it to complete...');
+		console.log('Device enumeration already in progress, waiting for it to complete...');
 		return await deviceEnumerationPromise;
 	}
 
@@ -236,6 +244,10 @@ async function getAllRazerDevices() {
 	
 	try {
 		const result = await deviceEnumerationPromise;
+		// Cache the results persistently
+		cachedDevices = result;
+		deviceCacheTimestamp = Date.now();
+		console.log(`Cached ${result.length} devices persistently (until invalidated)`);
 		return result;
 	} finally {
 		// Clear the promise when done (success or failure)
@@ -248,19 +260,19 @@ async function getAllRazerDevices() {
  */
 async function performDeviceEnumeration() {
 	try {
-		console.log('USB Worker: Starting device enumeration...');
+		console.log('Starting device enumeration...');
 		const customWebUSB = new WebUSB({
 			// This function returns all supported Razer devices
 			devicesFound: (devices) => {
-				console.log(`USB Worker: WebUSB found ${devices.length} total USB devices`);
+				console.log(`WebUSB found ${devices.length} total USB devices`);
 				const razerDevices = devices.filter(device => 
 					device.vendorId === RAZER_VENDOR_ID && 
 					RAZER_PRODUCTS[device.productId] !== undefined
 				);
 				
-				console.log(`USB Worker: Filtered to ${razerDevices.length} supported Razer devices`);
+				console.log(`Filtered to ${razerDevices.length} supported Razer devices`);
 				if (razerDevices.length > 0) {
-					console.log(`USB Worker: Found ${razerDevices.length} supported Razer device(s)`);
+					console.log(`Found ${razerDevices.length} supported Razer device(s)`);
 					razerDevices.forEach(device => {
 						console.log(`  - ${RAZER_PRODUCTS[device.productId].name} (0x${device.productId.toString(16)})`);
 					});
@@ -271,7 +283,7 @@ async function performDeviceEnumeration() {
 		});
 
 		// Get all devices
-		console.log('USB Worker: Requesting devices from WebUSB...');
+		console.log('Requesting devices from WebUSB...');
 		
 		// Add a safety timeout around WebUSB call
 		const devicePromise = customWebUSB.requestDevice({
@@ -284,12 +296,12 @@ async function performDeviceEnumeration() {
 		
 		const devices = await Promise.race([devicePromise, timeoutPromise]);
 		
-		console.log(`USB Worker: WebUSB returned ${Array.isArray(devices) ? devices.length : (devices ? 1 : 0)} devices`);
+		console.log(`WebUSB returned ${Array.isArray(devices) ? devices.length : (devices ? 1 : 0)} devices`);
 
 		return Array.isArray(devices) ? devices : (devices ? [devices] : []);
 
 	} catch (error) {
-		console.error('USB Worker: Error finding devices:', error);
+		console.error('Error finding devices:', error);
 		return [];
 	}
 }
@@ -299,14 +311,23 @@ async function performDeviceEnumeration() {
  */
 async function getSpecificDevice(targetProductId) {
 	try {
-		const devices = await getAllRazerDevices();
+		let devices = await getAllRazerDevices();
 		
 		if (devices.length === 0) {
 			throw new Error('No Razer devices found on system');
 		}
 		
 		// Find the specific device
-		const targetDevice = devices.find(device => device.productId === targetProductId);
+		let targetDevice = devices.find(device => device.productId === targetProductId);
+		
+		// If device not found and we used cached results, try invalidating cache and re-enumerating
+		if (!targetDevice && cachedDevices && deviceCacheTimestamp) {
+			console.log(`Device 0x${targetProductId.toString(16)} not found in cache, invalidating and re-enumerating...`);
+			invalidateDeviceCache();
+			devices = await getAllRazerDevices();
+			targetDevice = devices.find(device => device.productId === targetProductId);
+		}
+		
 		if (!targetDevice) {
 			throw new Error(`Razer device with product ID 0x${targetProductId.toString(16)} not found`);
 		}
@@ -314,7 +335,7 @@ async function getSpecificDevice(targetProductId) {
 		return targetDevice;
 
 	} catch (error) {
-		console.error('USB Worker: Error finding device:', error);
+		console.error('Error finding device:', error);
 		return null;
 	}
 }
@@ -353,12 +374,12 @@ function createRazerRequest(mouse, command) {
  */
 async function getAvailableDevices() {
 	try {
-		log('USB Worker: Looking for all Razer devices...');
+		console.log('Looking for all Razer devices...');
 		
 		const devices = await getAllRazerDevices();
 		
 		if (devices.length === 0) {
-			log('USB Worker: No supported Razer devices found');
+			console.log('No supported Razer devices found');
 			return [];
 		}
 
@@ -371,15 +392,15 @@ async function getAvailableDevices() {
 			};
 		});
 
-		log(`USB Worker: Found ${deviceList.length} supported Razer devices:`);
+		console.log(`Found ${deviceList.length} supported Razer devices:`);
 		deviceList.forEach(device => {
-			log(`  - ${device.name} (${device.id})`);
+			console.log(`  - ${device.name} (${device.id})`);
 		});
 
 		return deviceList;
 
 	} catch (error) {
-		console.error('USB Worker: Error getting available devices:', error);
+		console.error('Error getting available devices:', error);
 		return [];
 	}
 }
@@ -389,41 +410,75 @@ async function getAvailableDevices() {
  */
 async function getBatteryLevel(targetProductId = null) {
 	try {
-		log(`USB Worker: Looking for Razer device${targetProductId ? ` with ID 0x${targetProductId.toString(16)}` : ''}...`);
+		console.log(`Looking for Razer device${targetProductId ? ` with ID 0x${targetProductId.toString(16)}` : ''}...`);
 		
 		// If no specific device requested, try to find a working one
 		if (!targetProductId) {
-			const devices = await getAllRazerDevices();
+			let devices = await getAllRazerDevices();
+			let triedWithFreshCache = false;
 			
 			// Try each device to find one that supports battery queries
 			for (const device of devices) {
 				try {
 					const result = await getBatteryFromDevice(device);
 					if (result) {
-						log(`USB Worker: Successfully got battery from ${RAZER_PRODUCTS[device.productId].name}`);
+						console.log(`Successfully got battery from ${RAZER_PRODUCTS[device.productId].name}`);
 						return result;
 					}
 				} catch (error) {
-					log(`USB Worker: Device ${RAZER_PRODUCTS[device.productId].name} failed: ${error.message}`);
+					// Check if this is a USB device error (device disconnected, changed mode, etc.)
+					if (!triedWithFreshCache && error.message && (
+						error.message.includes('LIBUSB_ERROR_NO_DEVICE') ||
+						error.message.includes('LIBUSB_ERROR_NOT_FOUND') ||
+						error.message.includes('open error')
+					)) {
+						console.log(`Device communication failed, invalidating device cache and retrying...`);
+						invalidateDeviceCache();
+						devices = await getAllRazerDevices();
+						triedWithFreshCache = true;
+						continue; // Retry with fresh devices
+					}
+					
+					console.log(`Device ${RAZER_PRODUCTS[device.productId].name} failed: ${error.message}`);
 					continue;
 				}
 			}
 			
-			log('USB Worker: No supported Razer devices found that support battery queries');
+			console.log('No supported Razer devices found that support battery queries');
 			return null;
 		}
 		
 		// Get specific device
 		const device = await getSpecificDevice(targetProductId);
 		if (!device) {
-			log('USB Worker: Specified Razer device not found');
+			console.log('Specified Razer device not found');
 			return null;
 		}
 
-		return await getBatteryFromDevice(device);
+		try {
+			return await getBatteryFromDevice(device);
+		} catch (error) {
+			// Check if this is a USB device error (device disconnected, changed mode, etc.)
+			if (error.message && (
+				error.message.includes('LIBUSB_ERROR_NO_DEVICE') ||
+				error.message.includes('LIBUSB_ERROR_NOT_FOUND') ||
+				error.message.includes('open error')
+			)) {
+				console.log(`Device communication failed, invalidating device cache and retrying...`);
+				invalidateDeviceCache();
+				
+				// Try once more with fresh device enumeration
+				const freshDevice = await getSpecificDevice(targetProductId);
+				if (freshDevice) {
+					return await getBatteryFromDevice(freshDevice);
+				}
+			}
+			// Re-throw the error to be handled by the outer catch
+			throw error;
+		}
 
 	} catch (error) {
-		console.error('USB Worker: Error in getBatteryLevel:', error);
+		console.error('Error in getBatteryLevel:', error);
 		return null;
 	}
 }
@@ -432,13 +487,12 @@ async function getBatteryLevel(targetProductId = null) {
  * Attempts to get battery from a specific device
  */
 async function getBatteryFromDevice(device) {
-	console.log(`USB Worker: Getting battery from device, product ID: 0x${device.productId.toString(16)}`);
 	const productInfo = RAZER_PRODUCTS[device.productId];
-	console.log(`USB Worker: Device: ${productInfo.name}`);
 
 	// Check if this is a keyboard device that needs different transaction ID
 	if (isKeyboardDevice(device.productId)) {
-		console.log(`USB Worker: Detected keyboard device, using keyboard-specific transaction ID...`);
+		console.log(`Getting battery from device: ${productInfo.name} (0x${device.productId.toString(16)}) [keyboard protocol]`);
+		console.log(`Detected keyboard device, using keyboard-specific transaction ID...`);
 		
 		// Open device for keyboard communication
 		await device.open();
@@ -455,13 +509,13 @@ async function getBatteryFromDevice(device) {
 				await device.releaseInterface(2);
 				await device.close();
 			} catch (closeError) {
-				console.error('USB Worker: Error closing keyboard device:', closeError);
+				console.error('Error closing keyboard device:', closeError);
 			}
 		}
 	}
 
 	// For non-keyboard devices, use dual-request approach (battery level + charging status)
-	console.log(`USB Worker: Using dual-request approach for mouse/headset device...`);
+	console.log(`Getting battery from device: ${productInfo.name} (0x${device.productId.toString(16)}) [dual-request protocol]`);
 
 	await device.open();
 	if (device.configuration === null) {
@@ -473,7 +527,7 @@ async function getBatteryFromDevice(device) {
 	try {
 		// Request 1: Get battery level (command 0x80)
 		const batteryMsg = createRazerRequest(device, 0x80);
-		console.log('USB Worker: Sending battery level request (0x80)...');
+		console.log('Sending battery level request (0x80)...');
 		
 		const batteryRequest = await device.controlTransferOut({
 			requestType: 'class',
@@ -483,7 +537,6 @@ async function getBatteryFromDevice(device) {
 			index: 0x00
 		}, batteryMsg);
 		
-		console.log(`USB Worker: Battery request result: ${batteryRequest.status}`);
 		await new Promise(res => setTimeout(res, 200));
 		
 		const batteryReply = await device.controlTransferIn({
@@ -494,19 +547,19 @@ async function getBatteryFromDevice(device) {
 			index: 0x00
 		}, 90);
 		
-		console.log(`USB Worker: Battery reply status: ${batteryReply.status}, bytes: ${batteryReply.data?.byteLength}`);
-		
 		let batteryLevel = null;
 		if (batteryReply.data && batteryReply.data.byteLength >= 10) {
 			// Battery level is in byte 9 (0-255 scale)
 			const rawBattery = batteryReply.data.getUint8(9);
 			batteryLevel = parseFloat((rawBattery / 255 * 100).toFixed(1));
-			log(`USB Worker: Battery level: ${batteryLevel}% (raw: ${rawBattery})`);
+			console.log(`Battery response: { status: "${batteryReply.status}", level: ${batteryLevel}%, raw: ${rawBattery}, bytes: ${batteryReply.data?.byteLength} }`);
+		} else {
+			console.log(`Battery response: { status: "${batteryReply.status}", bytes: ${batteryReply.data?.byteLength}, error: "insufficient_data" }`);
 		}
 
 		// Request 2: Get charging status (command 0x84)
 		const chargingMsg = createRazerRequest(device, 0x84);
-		console.log('USB Worker: Sending charging status request (0x84)...');
+		console.log('Sending charging status request (0x84)...');
 		
 		const chargingRequest = await device.controlTransferOut({
 			requestType: 'class',
@@ -516,7 +569,6 @@ async function getBatteryFromDevice(device) {
 			index: 0x00
 		}, chargingMsg);
 		
-		console.log(`USB Worker: Charging request result: ${chargingRequest.status}`);
 		await new Promise(res => setTimeout(res, 200));
 		
 		const chargingReply = await device.controlTransferIn({
@@ -527,14 +579,14 @@ async function getBatteryFromDevice(device) {
 			index: 0x00
 		}, 90);
 		
-		console.log(`USB Worker: Charging reply status: ${chargingReply.status}, bytes: ${chargingReply.data?.byteLength}`);
-		
 		let isCharging = false;
 		if (chargingReply.data && chargingReply.data.byteLength >= 10) {
 			// Charging status is in byte 9 (0 = not charging, 1 = charging)
 			const chargingStatus = chargingReply.data.getUint8(9);
 			isCharging = chargingStatus === 1;
-			log(`USB Worker: Charging status: ${isCharging} (raw: ${chargingStatus})`);
+			console.log(`Charging response: { status: "${chargingReply.status}", charging: ${isCharging}, raw: ${chargingStatus}, bytes: ${chargingReply.data?.byteLength} }`);
+		} else {
+			console.log(`Charging response: { status: "${chargingReply.status}", bytes: ${chargingReply.data?.byteLength}, error: "insufficient_data" }`);
 		}
 
 		return {
@@ -550,7 +602,7 @@ async function getBatteryFromDevice(device) {
 			await device.releaseInterface(device.configuration.interfaces[0].interfaceNumber);
 			await device.close();
 		} catch (closeError) {
-			console.error('USB Worker: Error closing device:', closeError);
+			console.error('Error closing device:', closeError);
 		}
 	}
 }
@@ -569,16 +621,16 @@ if (require.main === module) {
 	// Check if we're running in persistent mode (no command line args)
 	if (args.length === 0) {
 		// Persistent worker mode - listen for IPC messages
-		log('USB Worker: Starting in persistent mode...');
+		console.log('Starting in persistent mode...');
 		
 		// Handle graceful shutdown
 		process.on('SIGTERM', () => {
-			log('USB Worker: Received SIGTERM, shutting down...');
+			console.log('Received SIGTERM, shutting down...');
 			process.exit(0);
 		});
 		
 		process.on('SIGINT', () => {
-			log('USB Worker: Received SIGINT, shutting down...');
+			console.log('Received SIGINT, shutting down...');
 			process.exit(0);
 		});
 		
@@ -590,19 +642,19 @@ if (require.main === module) {
 				
 				switch (command) {
 					case 'list':
-						log('USB Worker: Getting available devices...');
+						console.log('Getting available devices...');
 						const devices = await getAvailableDevices();
 						result = { devices };
 						break;
 						
 					case 'battery':
 						const targetProductId = messageArgs && messageArgs[0] ? parseInt(messageArgs[0], 16) : null;
-						log(`USB Worker: Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
+						console.log(`Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
 						result = await getBatteryLevel(targetProductId);
 						break;
 						
 					case 'mouse':
-						log('USB Worker: Starting mouse battery check...');
+						console.log('Starting mouse battery check...');
 						const allDevices = await getAllRazerDevices();
 						const mouseDevices = allDevices.filter(device => !isKeyboardDevice(device.productId));
 						if (mouseDevices.length > 0) {
@@ -611,7 +663,7 @@ if (require.main === module) {
 						break;
 						
 					case 'keyboard':
-						log('USB Worker: Starting keyboard battery check...');
+						console.log('Starting keyboard battery check...');
 						const allDevicesKb = await getAllRazerDevices();
 						const keyboardDevices = allDevicesKb.filter(device => isKeyboardDevice(device.productId));
 						if (keyboardDevices.length > 0) {
@@ -627,7 +679,7 @@ if (require.main === module) {
 				process.send({ id, success: true, result });
 				
 			} catch (error) {
-				console.error('USB Worker: Error processing message:', error);
+				console.error('Error processing message:', error);
 				// Send error back to parent
 				process.send({ 
 					id: message.id, 
@@ -637,117 +689,117 @@ if (require.main === module) {
 			}
 		});
 		
-		log('USB Worker: Ready for IPC messages');
+		console.log('Ready for IPC messages');
 		
 	} else {
 		// Legacy command-line mode for backward compatibility
 		const command = args[0];
 		
 		if (command === 'list') {
-			console.log('USB Worker: Getting available devices...');
+			console.log('Getting available devices...');
 			
 			getAvailableDevices()
 				.then(devices => {
-					console.log('USB Worker: getAvailableDevices returned:', devices);
+					console.log('getAvailableDevices returned:', devices);
 					console.log(JSON.stringify({ devices }));
 					setTimeout(() => process.exit(0), 100);
 				})
 				.catch(error => {
-					console.error('USB Worker: Fatal error:', error);
+					console.error('Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
 				});
 		} else if (command === 'mouse') {
-			console.log('USB Worker: Starting mouse battery check...');
+			console.log('Starting mouse battery check...');
 			
 			// Find mouse devices and get battery from first available
 			getAllRazerDevices()
 				.then(async (devices) => {
 					const mouseDevices = devices.filter(device => !isKeyboardDevice(device.productId));
 					if (mouseDevices.length === 0) {
-						console.log('USB Worker: No mouse devices found');
+						console.log('No mouse devices found');
 						setTimeout(() => process.exit(1), 100);
 						return;
 					}
 
 					const result = await getBatteryFromDevice(mouseDevices[0]);
-					console.log('USB Worker: getBatteryLevel returned:', result);
+					console.log('getBatteryLevel returned:', result);
 					if (result) {
 						console.log(JSON.stringify(result));
 						setTimeout(() => process.exit(0), 100);
 					} else {
-						console.log('USB Worker: No battery data available');
+						console.log('No battery data available');
 						setTimeout(() => process.exit(1), 100);
 					}
 				})
 				.catch(error => {
-					console.error('USB Worker: Fatal error:', error);
+					console.error('Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
 				});
 		} else if (command === 'keyboard') {
-			console.log('USB Worker: Starting keyboard battery check...');
+			console.log('Starting keyboard battery check...');
 			
 			// Find keyboard devices and get battery from first available
 			getAllRazerDevices()
 				.then(async (devices) => {
 					const keyboardDevices = devices.filter(device => isKeyboardDevice(device.productId));
 					if (keyboardDevices.length === 0) {
-						console.log('USB Worker: No keyboard devices found');
+						console.log('No keyboard devices found');
 						setTimeout(() => process.exit(1), 100);
 						return;
 					}
 
 					const result = await getBatteryFromDevice(keyboardDevices[0]);
-					console.log('USB Worker: getBatteryLevel returned:', result);
+					console.log('getBatteryLevel returned:', result);
 					if (result) {
 						console.log(JSON.stringify(result));
 						setTimeout(() => process.exit(0), 100);
 					} else {
-						console.log('USB Worker: No battery data available');
+						console.log('No battery data available');
 						setTimeout(() => process.exit(1), 100);
 					}
 				})
 				.catch(error => {
-					console.error('USB Worker: Fatal error:', error);
+					console.error('Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
 				});
 		} else if (command === 'battery') {
 			const targetProductIdArg = args[1];
 			const targetProductId = targetProductIdArg ? parseInt(targetProductIdArg, 16) : null;
 			
-			console.log(`USB Worker: Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
+			console.log(`Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
 			
 			getBatteryLevel(targetProductId)
 				.then(result => {
-					console.log('USB Worker: getBatteryLevel returned:', result);
+					console.log('getBatteryLevel returned:', result);
 					if (result) {
 						console.log(JSON.stringify(result));
 						setTimeout(() => process.exit(0), 100);
 					} else {
-						console.log('USB Worker: No battery data available');
+						console.log('No battery data available');
 						setTimeout(() => process.exit(1), 100);
 					}
 				})
 				.catch(error => {
-					console.error('USB Worker: Fatal error:', error);
+					console.error('Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
 				});
 		} else {
 			// Default behavior for backward compatibility
-			console.log('USB Worker: Starting battery check...');
+			console.log('Starting battery check...');
 			
 			getBatteryLevel()
 				.then(result => {
-					console.log('USB Worker: getBatteryLevel returned:', result);
+					console.log('getBatteryLevel returned:', result);
 					if (result) {
 						console.log(JSON.stringify(result));
 						setTimeout(() => process.exit(0), 100);
 					} else {
-						console.log('USB Worker: No battery data available');
+						console.log('No battery data available');
 						setTimeout(() => process.exit(1), 100);
 					}
 				})
 				.catch(error => {
-					console.error('USB Worker: Fatal error:', error);
+					console.error('Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
 				});
 		}
