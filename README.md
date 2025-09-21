@@ -33,6 +33,7 @@ No frills buttons (It's even using the image from the example counter app still!
 
 - Stream Deck software version 6.5 or higher
 - Razer mouse or keyboard
+- **Synapse, if installed, must not be running!** otherwise we get into all sorts of USB conflicts
 - Windows only? I honestly don't know. I'll try it on my Macbook Air and update this if it works...
 
 ## Motivation
@@ -89,5 +90,6 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 - Check that the device is recognized in Razer Synapse
 
 ---
+
 
 
