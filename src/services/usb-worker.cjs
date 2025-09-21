@@ -511,116 +511,194 @@ module.exports = {
 };
 
 // If this file is run directly, execute based on command line arguments
+// Handle both legacy command-line mode and persistent IPC mode
 if (require.main === module) {
 	const args = process.argv.slice(2);
-	const command = args[0];
 	
-	if (command === 'list') {
-		console.log('USB Worker: Getting available devices...');
+	// Check if we're running in persistent mode (no command line args)
+	if (args.length === 0) {
+		// Persistent worker mode - listen for IPC messages
+		console.log('USB Worker: Starting in persistent mode...');
 		
-		getAvailableDevices()
-			.then(devices => {
-				console.log('USB Worker: getAvailableDevices returned:', devices);
-				console.log(JSON.stringify({ devices }));
-				setTimeout(() => process.exit(0), 100);
-			})
-			.catch(error => {
-				console.error('USB Worker: Fatal error:', error);
-				setTimeout(() => process.exit(1), 100);
-			});
-	} else if (command === 'mouse') {
-		console.log('USB Worker: Starting mouse battery check...');
+		// Handle graceful shutdown
+		process.on('SIGTERM', () => {
+			console.log('USB Worker: Received SIGTERM, shutting down...');
+			process.exit(0);
+		});
 		
-		// Find mouse devices and get battery from first available
-		getAllRazerDevices()
-			.then(async (devices) => {
-				const mouseDevices = devices.filter(device => !isKeyboardDevice(device.productId));
-				if (mouseDevices.length === 0) {
-					console.log('USB Worker: No mouse devices found');
-					setTimeout(() => process.exit(1), 100);
-					return;
-				}
-
-				const result = await getBatteryFromDevice(mouseDevices[0]);
-				console.log('USB Worker: getBatteryLevel returned:', result);
-				if (result) {
-					console.log(JSON.stringify(result));
-					setTimeout(() => process.exit(0), 100);
-				} else {
-					console.log('USB Worker: No battery data available');
-					setTimeout(() => process.exit(1), 100);
-				}
-			})
-			.catch(error => {
-				console.error('USB Worker: Fatal error:', error);
-				setTimeout(() => process.exit(1), 100);
-			});
-	} else if (command === 'keyboard') {
-		console.log('USB Worker: Starting keyboard battery check...');
+		process.on('SIGINT', () => {
+			console.log('USB Worker: Received SIGINT, shutting down...');
+			process.exit(0);
+		});
 		
-		// Find keyboard devices and get battery from first available
-		getAllRazerDevices()
-			.then(async (devices) => {
-				const keyboardDevices = devices.filter(device => isKeyboardDevice(device.productId));
-				if (keyboardDevices.length === 0) {
-					console.log('USB Worker: No keyboard devices found');
-					setTimeout(() => process.exit(1), 100);
-					return;
+		// Listen for messages from parent process
+		process.on('message', async (message) => {
+			try {
+				const { id, command, args: messageArgs } = message;
+				let result = null;
+				
+				switch (command) {
+					case 'list':
+						console.log('USB Worker: Getting available devices...');
+						const devices = await getAvailableDevices();
+						result = { devices };
+						break;
+						
+					case 'battery':
+						const targetProductId = messageArgs && messageArgs[0] ? parseInt(messageArgs[0], 16) : null;
+						console.log(`USB Worker: Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
+						result = await getBatteryLevel(targetProductId);
+						break;
+						
+					case 'mouse':
+						console.log('USB Worker: Starting mouse battery check...');
+						const allDevices = await getAllRazerDevices();
+						const mouseDevices = allDevices.filter(device => !isKeyboardDevice(device.productId));
+						if (mouseDevices.length > 0) {
+							result = await getBatteryFromDevice(mouseDevices[0]);
+						}
+						break;
+						
+					case 'keyboard':
+						console.log('USB Worker: Starting keyboard battery check...');
+						const allDevicesKb = await getAllRazerDevices();
+						const keyboardDevices = allDevicesKb.filter(device => isKeyboardDevice(device.productId));
+						if (keyboardDevices.length > 0) {
+							result = await getBatteryFromDevice(keyboardDevices[0]);
+						}
+						break;
+						
+					default:
+						throw new Error(`Unknown command: ${command}`);
 				}
-
-				const result = await getBatteryFromDevice(keyboardDevices[0]);
-				console.log('USB Worker: getBatteryLevel returned:', result);
-				if (result) {
-					console.log(JSON.stringify(result));
-					setTimeout(() => process.exit(0), 100);
-				} else {
-					console.log('USB Worker: No battery data available');
-					setTimeout(() => process.exit(1), 100);
-				}
-			})
-			.catch(error => {
-				console.error('USB Worker: Fatal error:', error);
-				setTimeout(() => process.exit(1), 100);
-			});
-	} else if (command === 'battery') {
-		const targetProductIdArg = args[1];
-		const targetProductId = targetProductIdArg ? parseInt(targetProductIdArg, 16) : null;
+				
+				// Send result back to parent
+				process.send({ id, success: true, result });
+				
+			} catch (error) {
+				console.error('USB Worker: Error processing message:', error);
+				// Send error back to parent
+				process.send({ 
+					id: message.id, 
+					success: false, 
+					error: error.message 
+				});
+			}
+		});
 		
-		console.log(`USB Worker: Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
+		console.log('USB Worker: Ready for IPC messages');
 		
-		getBatteryLevel(targetProductId)
-			.then(result => {
-				console.log('USB Worker: getBatteryLevel returned:', result);
-				if (result) {
-					console.log(JSON.stringify(result));
-					setTimeout(() => process.exit(0), 100);
-				} else {
-					console.log('USB Worker: No battery data available');
-					setTimeout(() => process.exit(1), 100);
-				}
-			})
-			.catch(error => {
-				console.error('USB Worker: Fatal error:', error);
-				setTimeout(() => process.exit(1), 100);
-			});
 	} else {
-		// Default behavior for backward compatibility
-		console.log('USB Worker: Starting battery check...');
+		// Legacy command-line mode for backward compatibility
+		const command = args[0];
 		
-		getBatteryLevel()
-			.then(result => {
-				console.log('USB Worker: getBatteryLevel returned:', result);
-				if (result) {
-					console.log(JSON.stringify(result));
+		if (command === 'list') {
+			console.log('USB Worker: Getting available devices...');
+			
+			getAvailableDevices()
+				.then(devices => {
+					console.log('USB Worker: getAvailableDevices returned:', devices);
+					console.log(JSON.stringify({ devices }));
 					setTimeout(() => process.exit(0), 100);
-				} else {
-					console.log('USB Worker: No battery data available');
+				})
+				.catch(error => {
+					console.error('USB Worker: Fatal error:', error);
 					setTimeout(() => process.exit(1), 100);
-				}
-			})
-			.catch(error => {
-				console.error('USB Worker: Fatal error:', error);
-				setTimeout(() => process.exit(1), 100);
-			});
+				});
+		} else if (command === 'mouse') {
+			console.log('USB Worker: Starting mouse battery check...');
+			
+			// Find mouse devices and get battery from first available
+			getAllRazerDevices()
+				.then(async (devices) => {
+					const mouseDevices = devices.filter(device => !isKeyboardDevice(device.productId));
+					if (mouseDevices.length === 0) {
+						console.log('USB Worker: No mouse devices found');
+						setTimeout(() => process.exit(1), 100);
+						return;
+					}
+
+					const result = await getBatteryFromDevice(mouseDevices[0]);
+					console.log('USB Worker: getBatteryLevel returned:', result);
+					if (result) {
+						console.log(JSON.stringify(result));
+						setTimeout(() => process.exit(0), 100);
+					} else {
+						console.log('USB Worker: No battery data available');
+						setTimeout(() => process.exit(1), 100);
+					}
+				})
+				.catch(error => {
+					console.error('USB Worker: Fatal error:', error);
+					setTimeout(() => process.exit(1), 100);
+				});
+		} else if (command === 'keyboard') {
+			console.log('USB Worker: Starting keyboard battery check...');
+			
+			// Find keyboard devices and get battery from first available
+			getAllRazerDevices()
+				.then(async (devices) => {
+					const keyboardDevices = devices.filter(device => isKeyboardDevice(device.productId));
+					if (keyboardDevices.length === 0) {
+						console.log('USB Worker: No keyboard devices found');
+						setTimeout(() => process.exit(1), 100);
+						return;
+					}
+
+					const result = await getBatteryFromDevice(keyboardDevices[0]);
+					console.log('USB Worker: getBatteryLevel returned:', result);
+					if (result) {
+						console.log(JSON.stringify(result));
+						setTimeout(() => process.exit(0), 100);
+					} else {
+						console.log('USB Worker: No battery data available');
+						setTimeout(() => process.exit(1), 100);
+					}
+				})
+				.catch(error => {
+					console.error('USB Worker: Fatal error:', error);
+					setTimeout(() => process.exit(1), 100);
+				});
+		} else if (command === 'battery') {
+			const targetProductIdArg = args[1];
+			const targetProductId = targetProductIdArg ? parseInt(targetProductIdArg, 16) : null;
+			
+			console.log(`USB Worker: Starting battery check${targetProductId ? ` for device 0x${targetProductId.toString(16)}` : ''}...`);
+			
+			getBatteryLevel(targetProductId)
+				.then(result => {
+					console.log('USB Worker: getBatteryLevel returned:', result);
+					if (result) {
+						console.log(JSON.stringify(result));
+						setTimeout(() => process.exit(0), 100);
+					} else {
+						console.log('USB Worker: No battery data available');
+						setTimeout(() => process.exit(1), 100);
+					}
+				})
+				.catch(error => {
+					console.error('USB Worker: Fatal error:', error);
+					setTimeout(() => process.exit(1), 100);
+				});
+		} else {
+			// Default behavior for backward compatibility
+			console.log('USB Worker: Starting battery check...');
+			
+			getBatteryLevel()
+				.then(result => {
+					console.log('USB Worker: getBatteryLevel returned:', result);
+					if (result) {
+						console.log(JSON.stringify(result));
+						setTimeout(() => process.exit(0), 100);
+					} else {
+						console.log('USB Worker: No battery data available');
+						setTimeout(() => process.exit(1), 100);
+					}
+				})
+				.catch(error => {
+					console.error('USB Worker: Fatal error:', error);
+					setTimeout(() => process.exit(1), 100);
+				});
+		}
 	}
 }

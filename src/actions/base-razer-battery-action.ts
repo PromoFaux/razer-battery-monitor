@@ -4,6 +4,9 @@ import { RazerBatteryService } from "../services/razer-battery-service";
 // Shared service instance to avoid creating multiple instances
 const sharedBatteryService = new RazerBatteryService();
 
+// Export the shared service for shutdown handling
+export { sharedBatteryService };
+
 /**
  * Base class for Razer battery actions with common functionality.
  */
