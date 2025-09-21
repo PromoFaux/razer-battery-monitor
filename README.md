@@ -2,7 +2,7 @@
 
 This Stream Deck plugin displays the battery level of connected Razer mice or keyboards (at least, it should...) 
 
-There are two distinct actions, one for mouse and one for keyboard, which display information about the first one they find that match the type. The thought behind this is that people probably only have one mouse and keyboard connected (Though I am sure I will be proven wrong...)
+There are two distinct actions, one for mouse and one for keyboard, which display information about the first device they find that matches the type. The thought behind this is that people probably only have one mouse and keyboard connected (Though I am sure I will be proven wrong...)
 
 ## Features
 
@@ -25,16 +25,27 @@ No frills buttons (It's even using the image from the example counter app still!
 ![working](https://github.com/user-attachments/assets/015e5238-8407-4030-9f64-a277fd256dc8)
 
 > [!NOTE]  
-> A plugged in (charging) keyboard does not report it's battery percentage. This is known, and I couldn't find a way around this.
+> A plugged in (charging) keyboard does not report its battery percentage. This is a known hardware limitation.
+
+> [!IMPORTANT]  
+> **Synapse Compatibility**: This plugin works by communicating directly with Razer devices via USB HID protocols. Razer Synapse also communicates with these devices, creating conflicts when both try to access the hardware simultaneously. For best results, ensure Synapse is completely closed before using this plugin.
 
 ## Requirements
 
 **Stream Deck Software**: 
-
 - Stream Deck software version 6.5 or higher
-- Razer mouse or keyboard
-- **Synapse, if installed, must not be running!** otherwise we get into all sorts of USB conflicts
-- Windows only? I honestly don't know. I'll try it on my Macbook Air and update this if it works...
+- Razer mouse or keyboard with wireless capabilities
+- **⚠️ IMPORTANT: Razer Synapse must NOT be running!** 
+  - Synapse creates USB conflicts that prevent direct device communication
+  - You can have Synapse installed, but make sure it's completely closed before using this plugin
+  - Check your system tray and Task Manager to ensure no Synapse processes are running
+- Windows (tested) - macOS compatibility unknown
+
+## Known Issues & Limitations
+
+- **Synapse Conflict**: This plugin communicates directly with Razer devices via USB. Having Synapse running simultaneously will cause conflicts and prevent the plugin from working.
+- **Charging Detection**: Some keyboard models may not report battery percentage while charging/plugged in. This is a hardware limitation.
+- **First Device Only**: Each action type (mouse/keyboard) shows the first matching device found. Multiple devices of the same type are not individually supported.
 
 ## Motivation
 
@@ -74,6 +85,13 @@ npm run build
 npm run watch
 ```
 
+### Performance Testing
+The plugin includes comprehensive logging to monitor performance:
+- USB enumeration timing
+- Cache hit/miss rates  
+- Battery query response times
+- Worker process lifecycle events
+
 ## License
 
 MIT License - see LICENSE file for details
@@ -84,10 +102,29 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 ## Troubleshooting
 
+### Plugin Not Working
+1. **Check Synapse**: Ensure Razer Synapse is completely closed
+   - Close from system tray
+   - Check Task Manager for any Razer processes
+   - Restart Stream Deck software after closing Synapse
+
+2. **USB Connection Issues**:
+   - Unplug and reconnect your Razer device
+   - Try a different USB port
+   - Ensure the device is in wireless mode (not just charging)
+
+3. **Logging**:
+   - Check the plugin logs in: `%APPDATA%\Elgato\StreamDeck\Plugins\com.promofaux.razer-battery-monitor.sdPlugin\logs\`
+   - Look for recent `.log` files for detailed error information
+
 ### No Device Found
-- Ensure your Razer device is connected via USB
-- Try unplugging and reconnecting the device
-- Check that the device is recognized in Razer Synapse
+- Ensure your Razer device is connected and recognized by Windows
+- Verify the device model is supported (see Supported Devices section)
+- Try restarting the plugin by toggling it off/on in Stream Deck settings
+
+### Performance Issues
+- The plugin uses intelligent caching - first load may be slow, subsequent updates should be near-instant
+- If persistent issues occur, check the logs for USB enumeration errors
 
 ---
 
