@@ -24,6 +24,16 @@ export class RazerBatteryService {
 	private readonly DEVICE_CACHE_RETRY_INTERVAL = 5000; // Retry failed requests after 5 seconds
 	private lastDeviceListError = 0;
 	private deviceEnumerationPromise: Promise<Array<{productId: number, name: string, id: string}>> | null = null; // Prevent concurrent enumerations
+	
+	// Battery status caching per device (short-term cache to avoid redundant queries)
+	private batteryCache = new Map<number, {
+		batteryLevel: number | null,
+		deviceName: string,
+		productId: number,
+		isCharging?: boolean,
+		timestamp: number
+	}>();
+	private readonly BATTERY_CACHE_DURATION = 10000; // Cache battery status for 10 seconds
 
 	/**
 	 * Starts the persistent worker process if not already running.
@@ -237,6 +247,7 @@ export class RazerBatteryService {
 		this.deviceListCacheTime = 0;
 		this.lastDeviceListError = 0;
 		this.deviceEnumerationPromise = null; // Clear any ongoing enumeration
+		this.batteryCache.clear(); // Clear battery cache when devices change
 	}
 
 	/**
@@ -278,6 +289,15 @@ export class RazerBatteryService {
 					streamDeck.logger.warn(`Requested device 0x${targetProductId.toString(16)} not found in cache`);
 					return null;
 				}
+				
+				// Check battery cache first (short-term cache to avoid redundant USB queries)
+				const now = Date.now();
+				const cachedBattery = this.batteryCache.get(targetProductId);
+				if (cachedBattery && (now - cachedBattery.timestamp) < this.BATTERY_CACHE_DURATION) {
+					streamDeck.logger.info(`Using cached battery for ${targetDevice.name} (${now - cachedBattery.timestamp}ms old)`);
+					return cachedBattery;
+				}
+				
 				streamDeck.logger.info(`Getting battery for cached device: ${targetDevice.name}`); // Changed from debug to info
 			}
 
@@ -287,6 +307,14 @@ export class RazerBatteryService {
 			}
 			
 			const result = await this.sendMessage('battery', args, 6000);
+			
+			// Cache the result if we have a specific device
+			if (result && targetProductId !== undefined) {
+				this.batteryCache.set(targetProductId, {
+					...result,
+					timestamp: Date.now()
+				});
+			}
 			
 			// If the worker returns null for a specific device (device not found), 
 			// but our cache said it should exist, invalidate cache and retry once
