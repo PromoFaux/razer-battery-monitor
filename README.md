@@ -20,6 +20,10 @@ This plugin has been tested with the following Razer devices:
 
 *other devices should work but I am unable to test them as these are the only two I have!*
 
+No frills buttons (It's even using the image from the example counter app still!), but that might change
+
+![working](https://github.com/user-attachments/assets/015e5238-8407-4030-9f64-a277fd256dc8)
+
 > [!NOTE]  
 > A plugged in (charging) keyboard does not report it's battery percentage. This is known, and I couldn't find a way around this.
 
@@ -30,7 +34,6 @@ This plugin has been tested with the following Razer devices:
 - Stream Deck software version 6.5 or higher
 - Razer device connected via USB
 - Windows only? I honestly don't know. I'll try it on my Macbook Air and update this if it works...
-
 
 ## Motivation
 
@@ -86,3 +89,4 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 - Check that the device is recognized in Razer Synapse
 
 ---
+
