@@ -23,6 +23,7 @@ export class RazerBatteryService {
 	private deviceListCacheTime = 0;
 	private readonly DEVICE_CACHE_RETRY_INTERVAL = 5000; // Retry failed requests after 5 seconds
 	private lastDeviceListError = 0;
+	private deviceEnumerationPromise: Promise<Array<{productId: number, name: string, id: string}>> | null = null; // Prevent concurrent enumerations
 
 	/**
 	 * Starts the persistent worker process if not already running.
@@ -164,6 +165,18 @@ export class RazerBatteryService {
 			return this.deviceListCache;
 		}
 
+		// If there's already an enumeration in progress, wait for it
+		if (this.deviceEnumerationPromise !== null) {
+			streamDeck.logger.info('Device enumeration already in progress, waiting for it to complete...');
+			try {
+				return await this.deviceEnumerationPromise;
+			} catch (error) {
+				// If the concurrent enumeration failed, we'll start a new one below
+				streamDeck.logger.warn('Concurrent device enumeration failed, starting new enumeration:', error);
+				this.deviceEnumerationPromise = null;
+			}
+		}
+
 		// Don't retry too frequently if the last request failed
 		if (this.lastDeviceListError > 0 && 
 			(now - this.lastDeviceListError) < this.DEVICE_CACHE_RETRY_INTERVAL) {
@@ -171,6 +184,25 @@ export class RazerBatteryService {
 			return [];
 		}
 
+		// Start new enumeration
+		this.deviceEnumerationPromise = this.performDeviceEnumeration();
+		
+		try {
+			const devices = await this.deviceEnumerationPromise;
+			this.deviceEnumerationPromise = null; // Clear the promise on success
+			return devices;
+		} catch (error) {
+			this.deviceEnumerationPromise = null; // Clear the promise on error
+			throw error;
+		}
+	}
+
+	/**
+	 * Performs the actual device enumeration.
+	 */
+	private async performDeviceEnumeration(): Promise<Array<{productId: number, name: string, id: string}>> {
+		const now = Date.now();
+		
 		try {
 			streamDeck.logger.info('Refreshing device list cache...');
 			const result = await this.sendMessage('list', [], 10000); // Increased timeout from 5s to 10s
@@ -204,6 +236,7 @@ export class RazerBatteryService {
 		this.deviceListCache = null;
 		this.deviceListCacheTime = 0;
 		this.lastDeviceListError = 0;
+		this.deviceEnumerationPromise = null; // Clear any ongoing enumeration
 	}
 
 	/**

@@ -12,6 +12,9 @@ function log(message) {
 // Razer product definitions with their transaction IDs (from OpenRazer + test.js)
 const RAZER_VENDOR_ID = 0x1532;
 
+// USB Worker concurrent enumeration protection
+let deviceEnumerationPromise = null;
+
 // Device categories for better organization
 const RAZER_MICE = {
 	// Viper Series
@@ -222,6 +225,28 @@ async function getBatteryFromKeyboard(device, productId) {
  * Finds all Razer devices using WebUSB
  */
 async function getAllRazerDevices() {
+	// Check if device enumeration is already in progress
+	if (deviceEnumerationPromise) {
+		console.log('USB Worker: Device enumeration already in progress, waiting for it to complete...');
+		return await deviceEnumerationPromise;
+	}
+
+	// Start new enumeration
+	deviceEnumerationPromise = performDeviceEnumeration();
+	
+	try {
+		const result = await deviceEnumerationPromise;
+		return result;
+	} finally {
+		// Clear the promise when done (success or failure)
+		deviceEnumerationPromise = null;
+	}
+}
+
+/**
+ * Performs the actual device enumeration
+ */
+async function performDeviceEnumeration() {
 	try {
 		console.log('USB Worker: Starting device enumeration...');
 		const customWebUSB = new WebUSB({
