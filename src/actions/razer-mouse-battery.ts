@@ -22,14 +22,17 @@ export class RazerMouseBattery extends RazerBatteryAction<MouseBatterySettings> 
 	/**
 	 * Gets battery info for mouse devices using the service method.
 	 */
-	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
 		return await this.batteryService.getMouseBatteryInfo(forceRefresh);
 	}
 
 	/**
-	 * Formats the display text for mouse with charging indicator on separate line.
+	 * Formats the display text for mouse with charging indicator or sleep indicator on separate line.
 	 */
-	protected formatDisplayText(batteryPercent: number, isCharging: boolean): string {
+	protected formatDisplayText(batteryPercent: number, isCharging: boolean, isSleeping?: boolean): string {
+		if (isSleeping) {
+			return `Mouse\nSleeping\n💤`;
+		}
 		return isCharging 
 			? `Mouse\n${batteryPercent}%\n⚡`
 			: `Mouse\n${batteryPercent}%`;

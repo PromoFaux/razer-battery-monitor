@@ -589,9 +589,16 @@ async function getBatteryFromDevice(device) {
 			console.log(`Charging response: { status: "${chargingReply.status}", bytes: ${chargingReply.data?.byteLength}, error: "insufficient_data" }`);
 		}
 
+		// Detect sleep mode: battery level is 0 and not charging likely means sleeping
+		const isSleeping = (batteryLevel === 0 && !isCharging);
+		if (isSleeping) {
+			console.log(`Mouse appears to be sleeping (battery: 0%, not charging)`);
+		}
+
 		return {
 			batteryLevel: batteryLevel,
 			isCharging: isCharging,
+			isSleeping: isSleeping,
 			deviceName: productInfo.name,
 			productId: device.productId
 		};

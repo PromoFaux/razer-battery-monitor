@@ -229,7 +229,7 @@ export class RazerBatteryService {
 	 * Gets battery information for the first available mouse device.
 	 * Uses simple cache invalidation: if no mouse found or communication failed, invalidate cache and retry once.
 	 */
-	async getMouseBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	async getMouseBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
 		try {
 			// Force cache invalidation if requested (manual refresh button press)  
 			if (forceRefresh) {
@@ -241,17 +241,19 @@ export class RazerBatteryService {
 		let result = await this.sendMessage('mouse');
 		
 		// If no mouse found, or result is null/invalid, and we haven't already invalidated the cache, try once more with fresh enumeration
-		// Note: Don't treat charging mice (batteryLevel: null, isCharging: true) as missing devices
-		if ((!result || (result.batteryLevel === null && !result.isCharging)) && !forceRefresh) {
+		// Note: Don't treat charging mice (batteryLevel: null, isCharging: true) or sleeping mice (isSleeping: true) as missing devices
+		if ((!result || (result.batteryLevel === null && !result.isCharging && !result.isSleeping)) && !forceRefresh) {
 			streamDeck.logger.info('[   Service] No mouse found or communication failed - invalidating cache and retrying...');
 			await this.invalidateDeviceCache();
 			result = await this.sendMessage('mouse');
 		}
 		
-		// Accept valid results: either have battery level OR are charging
-		if (result && (result.batteryLevel !== null || result.isCharging)) {
+		// Accept valid results: either have battery level OR are charging OR are sleeping
+		if (result && (result.batteryLevel !== null || result.isCharging || result.isSleeping)) {
 			// Log appropriate message based on device state
-			if (result.isCharging && result.batteryLevel === null) {
+			if (result.isSleeping) {
+				streamDeck.logger.info(`[   Service] Found sleeping mouse: ${result.deviceName || 'Unknown'}`);
+			} else if (result.isCharging && result.batteryLevel === null) {
 				streamDeck.logger.info(`[   Service] Found charging mouse: ${result.deviceName || 'Unknown'}`);
 			} else {
 				streamDeck.logger.info(`[   Service] Found mouse: ${result.deviceName || 'Unknown'}`);
@@ -264,7 +266,8 @@ export class RazerBatteryService {
 				batteryLevel: result.batteryLevel,
 				deviceName: result.deviceName || 'Unknown Mouse',
 				productId: result.productId || 0,
-				isCharging: result.isCharging
+				isCharging: result.isCharging,
+				isSleeping: result.isSleeping
 			};
 		}
 		
@@ -281,7 +284,7 @@ export class RazerBatteryService {
 	 * Gets battery information for the first available keyboard device.
 	 * Uses simple cache invalidation: if no keyboard found or communication failed, invalidate cache and retry once.
 	 */
-	async getKeyboardBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	async getKeyboardBatteryInfo(forceRefresh: boolean = false): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
 		try {
 			// Force cache invalidation if requested (manual refresh button press)
 			if (forceRefresh) {
@@ -316,7 +319,8 @@ export class RazerBatteryService {
 				batteryLevel: result.batteryLevel,
 				deviceName: result.deviceName || 'Unknown Keyboard',
 				productId: result.productId || 0,
-				isCharging: result.isCharging
+				isCharging: result.isCharging,
+				isSleeping: false  // Keyboards don't support sleep detection yet
 			};
 		}
 		

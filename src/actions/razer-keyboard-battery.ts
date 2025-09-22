@@ -22,14 +22,18 @@ export class RazerKeyboardBattery extends RazerBatteryAction<KeyboardBatterySett
 	/**
 	 * Gets battery info for keyboard devices using the service method.
 	 */
-	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null> {
+	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
 		return await this.batteryService.getKeyboardBatteryInfo(forceRefresh);
 	}
 
 	/**
 	 * Formats the display text for keyboard with charging indicator.
 	 */
-	protected formatDisplayText(batteryPercent: number, isCharging: boolean): string {
+	protected formatDisplayText(batteryPercent: number, isCharging: boolean, isSleeping?: boolean): string {
+		if (isSleeping) {
+			// Keyboards don't currently support sleep detection, but included for consistency
+			return `Keyb\nSleeping\n💤`;
+		}
 		if (isCharging) {
 			// When charging, just show the lightning bolt emoji
 			return `Keyb\n⚡`;

@@ -79,15 +79,20 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 				   };
 				   await ev.action.setSettings(newSettings);
 				   
-				   if (batteryInfo.isCharging && batteryInfo.batteryLevel === null) {
+				   if (batteryInfo.isSleeping) {
+					   // Device is sleeping
+					   const displayText = this.formatDisplayText(0, false, true);
+					   streamDeck.logger.info(`[   Service] ${deviceType} is sleeping`);
+					   await ev.action.setTitle(displayText);
+				   } else if (batteryInfo.isCharging && batteryInfo.batteryLevel === null) {
 					   // Device is charging but battery level is unreliable
-					   const displayText = this.formatDisplayText(0, true);
+					   const displayText = this.formatDisplayText(0, true, false);
 					   streamDeck.logger.info(`[   Service] ${deviceType} battery: charging (level unavailable)`);
 					   await ev.action.setTitle(displayText);
 				   } else if (batteryInfo.batteryLevel !== null) {
 					   // Normal case with valid battery level
 					   const batteryPercent = Math.round(batteryInfo.batteryLevel);
-					   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false);
+					   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false, false);
 					   streamDeck.logger.info(`[   Service] ${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
 					   await ev.action.setTitle(displayText);
 					   // Set battery level icon
@@ -139,14 +144,14 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 	// Abstract methods that subclasses must implement
 	protected abstract getDeviceType(): string;
 	protected abstract getDefaultInterval(): number;
-	protected abstract formatDisplayText(batteryPercent: number, isCharging: boolean): string;
+	protected abstract formatDisplayText(batteryPercent: number, isCharging: boolean, isSleeping?: boolean): string;
 	protected abstract getDisplayPrefix(): string;
 	
 	/**
 	 * Abstract method to get battery info for the specific device type.
 	 * Subclasses should call the appropriate service method (getMouseBatteryInfo or getKeyboardBatteryInfo).
 	 */
-	protected abstract getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean} | null>;
+	protected abstract getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null>;
 }
 
 /**
