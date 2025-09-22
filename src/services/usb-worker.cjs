@@ -154,25 +154,11 @@ async function getBatteryFromKeyboard(device, productId) {
 	
 	try {
 		// Single request: Get battery level (command 0x80) - format tells us charging status
-		const batteryMsg = createRazerRequest(device, 0x80);
-		
-		const batteryRequest = await device.controlTransferOut({
-			requestType: 'class',
-			recipient: 'interface',
+		const batteryReply = await sendRazerBatteryCommand(device, 0x80, {
 			request: 0x09, // SET_REPORT
 			value: 0x0300, // Report Type: Feature (3), Report ID: 0
 			index: 2, // Interface 2 (control interface) for keyboards
-		}, batteryMsg);
-		
-		await new Promise(res => setTimeout(res, 50)); // Reduced delay for faster response
-		
-		const batteryReply = await device.controlTransferIn({
-			requestType: 'class',
-			recipient: 'interface',
-			request: 0x01, // GET_REPORT
-			value: 0x0300, // Report Type: Feature (3), Report ID: 0
-			index: 2, // Interface 2 (control interface) for keyboards
-		}, 90);
+		});
 		
 		if (batteryReply.data && batteryReply.data.byteLength >= 10) {
 			const responseArray = new Uint8Array(batteryReply.data.buffer);
@@ -367,6 +353,55 @@ function createRazerRequest(mouse, command) {
 	return fullMsg;
 }
 
+/**
+ * Sends a Razer command
+ * @param {object} device - USB device
+ * @param {Uint8Array} message - Prepared Razer command message
+ * @param {object} transferParams - USB transfer parameters { request, value, index }
+ * @param {number} responseLength - Expected response length in bytes
+ * @returns {Promise<object>} USB control transfer response
+ */
+async function sendRazerCommand(device, message, transferParams, responseLength = 90) {
+	// Pre-send delay for communication stability (based on OpenRGB timing patterns)
+	await new Promise(res => setTimeout(res, 2));
+	
+	// Send the command
+	await device.controlTransferOut({
+		requestType: 'class',
+		recipient: 'interface',
+		request: transferParams.request,
+		value: transferParams.value,
+		index: transferParams.index
+	}, message);
+	
+	// Post-send delay before reading response
+	await new Promise(res => setTimeout(res, 5));
+	
+	// Read the response
+	const response = await device.controlTransferIn({
+		requestType: 'class',
+		recipient: 'interface',
+		request: 0x01, // GET_REPORT
+		value: transferParams.value,
+		index: transferParams.index
+	}, responseLength);
+	
+	return response;
+}
+
+/**
+ * Creates and sends a Razer command in one step - convenience function for the common pattern
+ * @param {object} device - USB device
+ * @param {number} command - Razer command (0x80 for battery, 0x84 for charging)
+ * @param {object} transferParams - USB transfer parameters { request, value, index }
+ * @param {number} responseLength - Expected response length in bytes
+ * @returns {Promise<object>} USB control transfer response
+ */
+async function sendRazerBatteryCommand(device, command, transferParams, responseLength = 90) {
+	const message = createRazerRequest(device, command);
+	return await sendRazerCommand(device, message, transferParams, responseLength);
+}
+
 
 
 /**
@@ -526,26 +561,13 @@ async function getBatteryFromDevice(device) {
 
 	try {
 		// Request 1: Get battery level (command 0x80)
-		const batteryMsg = createRazerRequest(device, 0x80);
 		console.log('Sending battery level request (0x80)...');
 		
-		const batteryRequest = await device.controlTransferOut({
-			requestType: 'class',
-			recipient: 'interface',
+		const batteryReply = await sendRazerBatteryCommand(device, 0x80, {
 			request: 0x09,
 			value: 0x300,
 			index: 0x00
-		}, batteryMsg);
-		
-		await new Promise(res => setTimeout(res, 200));
-		
-		const batteryReply = await device.controlTransferIn({
-			requestType: 'class',
-			recipient: 'interface',
-			request: 0x01,
-			value: 0x300,
-			index: 0x00
-		}, 90);
+		});
 		
 		let batteryLevel = null;
 		if (batteryReply.data && batteryReply.data.byteLength >= 10) {
@@ -557,27 +579,17 @@ async function getBatteryFromDevice(device) {
 			console.log(`Battery response: { status: "${batteryReply.status}", bytes: ${batteryReply.data?.byteLength}, error: "insufficient_data" }`);
 		}
 
+		// Small delay between requests for better protocol adherence
+		await new Promise(res => setTimeout(res, 1));
+
 		// Request 2: Get charging status (command 0x84)
-		const chargingMsg = createRazerRequest(device, 0x84);
 		console.log('Sending charging status request (0x84)...');
 		
-		const chargingRequest = await device.controlTransferOut({
-			requestType: 'class',
-			recipient: 'interface',
+		const chargingReply = await sendRazerBatteryCommand(device, 0x84, {
 			request: 0x09,
 			value: 0x300,
 			index: 0x00
-		}, chargingMsg);
-		
-		await new Promise(res => setTimeout(res, 200));
-		
-		const chargingReply = await device.controlTransferIn({
-			requestType: 'class',
-			recipient: 'interface',
-			request: 0x01,
-			value: 0x300,
-			index: 0x00
-		}, 90);
+		});
 		
 		let isCharging = false;
 		if (chargingReply.data && chargingReply.data.byteLength >= 10) {
