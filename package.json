@@ -1,13 +1,13 @@
 {
     "scripts": {
         "prebuild": "shx mkdir -p com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules",
-        "copy:usb-worker": "shx cp src/services/usb-worker.cjs com.promofaux.razer-battery-monitor.sdPlugin/bin/usb-worker.cjs",
         "copy:usb": "shx cp -r node_modules/usb com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules/usb",
         "copy:node-addon-api": "shx cp -r node_modules/node-addon-api com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules/node-addon-api",
         "copy:node-gyp-build": "shx cp -r node_modules/node-gyp-build com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules/node-gyp-build",
         "copy:types": "shx cp -r node_modules/@types com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules/@types",
+        "rebuild:usb": "cd com.promofaux.razer-battery-monitor.sdPlugin/bin/node_modules/usb && npm rebuild --target=20.19.0 --target_arch=x64 --target_platform=win32",
         "build:rollup": "rollup -c",
-        "build:copy": "npm run copy:usb-worker && npm run copy:usb && npm run copy:node-addon-api && npm run copy:node-gyp-build && npm run copy:types",
+        "build:copy": "npm run copy:usb && npm run copy:node-addon-api && npm run copy:node-gyp-build && npm run copy:types && npm run rebuild:usb",
         "build": "npm run build:rollup && npm run build:copy",
         "watch": "rollup -c -w --watch.onEnd=\"npm run prebuild && npm run build:copy\""
     },

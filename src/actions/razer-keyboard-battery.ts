@@ -23,7 +23,7 @@ export class RazerKeyboardBattery extends RazerBatteryAction<KeyboardBatterySett
 	 * Gets battery info for keyboard devices using the service method.
 	 */
 	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
-		return await this.batteryService.getKeyboardBatteryInfo(forceRefresh);
+		return await this.batteryService.getKeyboardBatteryLevel();
 	}
 
 	/**

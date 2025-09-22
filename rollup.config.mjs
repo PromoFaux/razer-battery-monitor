@@ -13,8 +13,10 @@ const sdPlugin = "com.promofaux.razer-battery-monitor.sdPlugin";
  */
 const config = {
 	input: "src/plugin.ts",
+	external: ['usb'], // Mark USB as external - don't bundle it
 	output: {
-		file: `${sdPlugin}/bin/plugin.js`,
+		file: `${sdPlugin}/bin/plugin.cjs`,
+		format: 'cjs',
 		sourcemap: isWatching,
 		sourcemapPathTransform: (relativeSourcePath, sourcemapPath) => {
 			return url.pathToFileURL(path.resolve(path.dirname(sourcemapPath), relativeSourcePath)).href;
@@ -38,9 +40,9 @@ const config = {
 		commonjs(),
 		!isWatching && terser(),
 		{
-			name: "emit-module-package-file",
+			name: "emit-commonjs-package-file",
 			generateBundle() {
-				this.emitFile({ fileName: "package.json", source: `{ "type": "module" }`, type: "asset" });
+				this.emitFile({ fileName: "package.json", source: `{ "type": "commonjs" }`, type: "asset" });
 			}
 		}
 	]

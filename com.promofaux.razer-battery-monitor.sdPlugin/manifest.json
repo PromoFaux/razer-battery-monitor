@@ -38,7 +38,7 @@
 	],
 	"Category": "Razer Battery Monitor",
 	"CategoryIcon": "imgs/plugin/category-icon",
-	"CodePath": "bin/plugin.js",
+	"CodePath": "bin/plugin.cjs",
 	"Description": "A Plugin to read battery levels of various Razer Devices",
 	"Icon": "imgs/plugin/marketplace",
 	"SDKVersion": 2,

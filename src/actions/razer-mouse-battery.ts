@@ -23,7 +23,7 @@ export class RazerMouseBattery extends RazerBatteryAction<MouseBatterySettings> 
 	 * Gets battery info for mouse devices using the service method.
 	 */
 	protected async getBatteryInfo(forceRefresh: boolean): Promise<{batteryLevel: number | null, deviceName: string, productId: number, isCharging?: boolean, isSleeping?: boolean} | null> {
-		return await this.batteryService.getMouseBatteryInfo(forceRefresh);
+		return await this.batteryService.getMouseBatteryLevel();
 	}
 
 	/**
