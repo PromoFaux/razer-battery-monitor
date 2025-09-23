@@ -33,9 +33,10 @@ export class RazerMouseBattery extends RazerBatteryAction<MouseBatterySettings> 
 		if (isSleeping) {
 			return `Mouse\nSleeping\n💤`;
 		}
+		const percentText = batteryPercent !== null ? batteryPercent.toFixed(1) : "--";
 		return isCharging 
-			? `Mouse\n${batteryPercent}%\n⚡`
-			: `Mouse\n${batteryPercent}%`;
+			? `Mouse\n${percentText}%\n⚡`
+			: `Mouse\n${percentText}%`;
 	}
 }
 

@@ -38,8 +38,9 @@ export class RazerKeyboardBattery extends RazerBatteryAction<KeyboardBatterySett
 			// When charging, just show the lightning bolt emoji
 			return `Keyb\n⚡`;
 		} else {
-			// Normal battery display (not charging)
-			return `Keyb\n${batteryPercent}%`;
+            // Normal battery display (not charging)
+            const percentText = batteryPercent !== null ? batteryPercent.toFixed(1) : "--";
+            return `Keyb\n${percentText}%`;
 		}
 	}
 }

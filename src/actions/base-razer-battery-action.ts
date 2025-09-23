@@ -89,17 +89,17 @@ export abstract class RazerBatteryAction<T extends BatterySettings> extends Sing
 					   const displayText = this.formatDisplayText(0, true, false);
 					   streamDeck.logger.info(`[   Service] ${deviceType} battery: charging (level unavailable)`);
 					   await ev.action.setTitle(displayText);
-				   } else if (batteryInfo.batteryLevel !== null) {
-					   // Normal case with valid battery level
-					   const batteryPercent = Math.round(batteryInfo.batteryLevel);
-					   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false, false);
-					   streamDeck.logger.info(`[   Service] ${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
-					   await ev.action.setTitle(displayText);
-					   // Set battery level icon
-					   const iconPath = this.getBatteryIconPath(batteryInfo.batteryLevel);
-					   if (iconPath) {
-						   await ev.action.setImage(iconPath);
-					   }
+				} else if (batteryInfo.batteryLevel !== null) {
+				   // Normal case with valid battery level
+				   const batteryPercent = batteryInfo.batteryLevel;
+				   const displayText = this.formatDisplayText(batteryPercent, batteryInfo.isCharging ?? false, false);
+				   streamDeck.logger.info(`[   Service] ${deviceType} battery: ${batteryPercent}%${batteryInfo.isCharging ? ' (charging)' : ''}`);
+				   await ev.action.setTitle(displayText);
+				   // Set battery level icon
+				   const iconPath = this.getBatteryIconPath(batteryInfo.batteryLevel);
+				   if (iconPath) {
+					   await ev.action.setImage(iconPath);
+				   }
 				   } else {
 					   // Device found but no battery data - update settings to reflect this
 					   const newSettings = {
