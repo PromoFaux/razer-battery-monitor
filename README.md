@@ -1,3 +1,7 @@
+> [!NOTE]
+> This was a fun(ish) project, though short lived. I am no longer using any Razer wireless devices, and so have no need for this plugin.
+
+
 # Razer Battery Stream Deck Plugin
 
 This Stream Deck plugin displays the battery level of connected Razer mice or keyboards (at least, it should...) 
@@ -127,6 +131,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 - If persistent issues occur, check the logs for USB enumeration errors
 
 ---
+
 
 
 
